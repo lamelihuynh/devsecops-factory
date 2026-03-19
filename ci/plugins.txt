@@ -1,0 +1,43 @@
+# ci/plugins.txt — OWNED BY TEAM 1
+# Jenkins plugin list for Configuration as Code bootstrap.
+# Format: pluginId:version  (or just pluginId for latest)
+
+# Core pipeline
+workflow-aggregator
+pipeline-stage-view
+pipeline-github-lib
+git
+github
+blueocean
+
+# Configuration as Code
+configuration-as-code
+
+# Docker
+docker-workflow
+docker-plugin
+
+# Kubernetes agents
+kubernetes
+
+# SonarQube integration
+sonar
+
+# Credentials & security
+credentials-binding
+credentials
+
+# Notifications
+build-timeout
+timestamper
+ws-cleanup
+
+# HTML publisher (for scan reports)
+htmlpublisher
+
+# JUnit test results
+junit
+
+# Utility
+ansicolor
+locale

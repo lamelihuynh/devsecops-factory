@@ -1,0 +1,36 @@
+# =============================================================================
+# shared/contracts/image-names.yaml
+#
+# ALL image names and tags follow this convention.
+# Team 1 sets REGISTRY in CI. Team 3 references the same name in manifests.
+# Team 2 scans the same name/tag in Trivy/Grype.
+#
+# Pattern: ${REGISTRY}/${APP_NAME}:${IMAGE_TAG}
+# Local:   localhost:5001/tetris-devsecops:<git-sha-8>
+# Cloud:   <ecr-url>/tetris-devsecops:<git-sha-8>
+# =============================================================================
+
+registry:
+  local: "localhost:5001"
+  cloud: ""   # filled by Team 1 in .env.cloud after Terraform apply
+
+# Image naming: <registry>/<name>:<tag>
+images:
+  app:
+    name: tetris-devsecops
+    tag_format: "${GIT_COMMIT_SHORT}"     # first 8 chars of git SHA
+    latest_alias: "latest"
+    owner: team-infra     # Team 1 builds and pushes
+    scanner: team-security  # Team 2 scans
+
+  # CI agent image (rebuilt only when Dockerfile.agent changes)
+  ci_agent:
+    name: devsecops-agent
+    tag_format: "v${DATE}"
+    owner: team-infra
+
+# Tag variables (Team 1 sets in Jenkinsfile, all teams can read)
+tag_variables:
+  GIT_COMMIT_SHORT: "$(git rev-parse --short HEAD)"
+  BUILD_NUMBER:     "${BUILD_NUMBER}"  # Jenkins env var
+  DATE:             "$(date +%Y%m%d)"

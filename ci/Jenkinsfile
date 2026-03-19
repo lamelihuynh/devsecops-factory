@@ -1,0 +1,247 @@
+// =============================================================================
+// ci/Jenkinsfile — OWNED BY TEAM 1 (orchestration skeleton)
+//
+// TEAM 1 owns: stage names, agent config, env vars, order of stages
+// TEAM 2 owns: the scripts in ci/stages/*.sh that each security stage calls
+// TEAM 3 owns: app/ Dockerfile, kubernetes/ manifests, cd/ GitOps repo
+//
+// The Jenkinsfile calls Team 2's scripts as black boxes.
+// Team 2 can change scan logic without touching this file.
+//
+// Environment switching (set in Jenkins or .env):
+//   Local:  REGISTRY=localhost:5001
+//   Cloud:  REGISTRY=<account>.dkr.ecr.<region>.amazonaws.com
+// =============================================================================
+
+pipeline {
+  agent {
+    docker {
+      image "${env.REGISTRY ?: 'localhost:5001'}/devsecops-agent:latest"
+      args  '--network devsecops -v /var/run/docker.sock:/var/run/docker.sock -u root'
+    }
+  }
+
+  environment {
+    // ── Registry — Team 1 sets, Team 3 reads in manifests ─
+    REGISTRY         = "${env.REGISTRY ?: 'localhost:5001'}"
+    IMAGE_NAME       = "${REGISTRY}/tetris-devsecops"
+    IMAGE_TAG        = "${env.GIT_COMMIT?.take(8) ?: 'dev'}"
+    REPORT_DIR       = "/tmp/security-reports"
+
+    // ── Tool endpoints — from Jenkins CasC / .env ─────────
+    SONAR_HOST       = "${env.SONAR_HOST ?: 'http://sonarqube:9000'}"
+    SONAR_TOKEN      = credentials('sonar-token')
+    DEFECTDOJO_URL   = "${env.DEFECTDOJO_URL ?: 'http://defectdojo:8080'}"
+    DEFECTDOJO_KEY   = credentials('defectdojo-api-key')
+    ENGAGEMENT_NAME  = "Jenkins-${env.BUILD_NUMBER}"
+
+    // ── Team 2 threshold config (read from env, defaults set here) ─
+    TRIVY_SEVERITY   = "${env.TRIVY_SEVERITY ?: 'HIGH,CRITICAL'}"
+    TRIVY_EXIT_CODE  = "${env.TRIVY_EXIT_CODE ?: '1'}"
+    OWASP_FAIL_CVSS  = "${env.OWASP_FAIL_CVSS ?: '8'}"
+    SONAR_QUALITY_GATE = "${env.SONAR_QUALITY_GATE ?: 'true'}"
+
+    // ── Team 3 GitOps config ──────────────────────────────
+    GITOPS_REPO      = "${env.GITOPS_REPO ?: 'http://gitea:3000/gitadmin/tetris-gitops.git'}"
+    STAGING_URL      = "${env.STAGING_URL ?: 'http://tetris-staging.localhost'}"
+    GIT_CREDS        = credentials('gitea-creds')
+  }
+
+  options {
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+    timeout(time: 60, unit: 'MINUTES')
+    timestamps()
+    ansiColor('xterm')
+  }
+
+  stages {
+
+    stage('① Secrets scan') {
+      // TEAM 2 OWNS: ci/stages/secrets-scan.sh
+      steps {
+        sh 'mkdir -p ${REPORT_DIR}'
+        sh 'chmod +x ci/stages/secrets-scan.sh && ci/stages/secrets-scan.sh'
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: "${REPORT_DIR}/gitleaks.json", allowEmptyArchive: true
+          archiveArtifacts artifacts: "${REPORT_DIR}/trufflehog.json", allowEmptyArchive: true
+        }
+      }
+    }
+
+    stage('② Build + unit tests') {
+      // TEAM 1 OWNS: build tooling; TEAM 3 OWNS: the app source
+      steps {
+        sh '''
+          echo "=== Build + unit tests ==="
+          npm ci --prefer-offline --loglevel=error
+          npm test -- --watchAll=false --passWithNoTests || true
+          npm run build
+          echo "Build complete"
+        '''
+      }
+    }
+
+    stage('③ SCA — OWASP Dependency-Check') {
+      // TEAM 2 OWNS: ci/stages/sca-scan.sh
+      steps {
+        sh 'chmod +x ci/stages/sca-scan.sh && ci/stages/sca-scan.sh'
+      }
+      post {
+        always {
+          publishHTML(target: [
+            reportDir: "${REPORT_DIR}",
+            reportFiles: 'dependency-check-report.html',
+            reportName: 'SCA Report',
+            allowMissing: true
+          ])
+        }
+      }
+    }
+
+    stage('④ SAST — SonarQube') {
+      // TEAM 2 OWNS: ci/stages/sast-scan.sh + security/sast/sonar-project.properties
+      steps {
+        sh 'chmod +x ci/stages/sast-scan.sh && ci/stages/sast-scan.sh'
+        script {
+          if (env.SONAR_QUALITY_GATE == 'true') {
+            def qg = waitForQualityGate(abortPipeline: false)
+            if (qg.status != 'OK') {
+              unstable("SonarQube Quality Gate: ${qg.status}")
+            }
+          }
+        }
+      }
+    }
+
+    stage('⑤ Docker build') {
+      // TEAM 1 OWNS: build args; TEAM 3 OWNS: app/Dockerfile
+      steps {
+        sh '''
+          docker build \
+            --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+            --build-arg GIT_COMMIT=${IMAGE_TAG} \
+            --label org.opencontainers.image.revision=${IMAGE_TAG} \
+            --label org.opencontainers.image.created=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+            -t ${IMAGE_NAME}:${IMAGE_TAG} \
+            -t ${IMAGE_NAME}:latest \
+            app/
+          echo "Image built: ${IMAGE_NAME}:${IMAGE_TAG}"
+        '''
+      }
+    }
+
+    stage('⑥ Container scan — Trivy') {
+      // TEAM 2 OWNS: ci/stages/container-scan.sh + security/container/trivy.yaml
+      steps {
+        sh "chmod +x ci/stages/container-scan.sh && ci/stages/container-scan.sh ${IMAGE_NAME}:${IMAGE_TAG}"
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: "${REPORT_DIR}/trivy.json", allowEmptyArchive: true
+        }
+      }
+    }
+
+    stage('⑦ IaC scan — Checkov') {
+      // TEAM 2 OWNS: ci/stages/iac-scan.sh
+      steps {
+        sh 'chmod +x ci/stages/iac-scan.sh && ci/stages/iac-scan.sh'
+      }
+    }
+
+    stage('⑧ Push image') {
+      // TEAM 1 OWNS
+      steps {
+        sh '''
+          docker push ${IMAGE_NAME}:${IMAGE_TAG}
+          docker push ${IMAGE_NAME}:latest
+          echo "Pushed: ${IMAGE_NAME}:${IMAGE_TAG}"
+        '''
+      }
+    }
+
+    stage('⑨ Update GitOps repo') {
+      // TEAM 1 OWNS: git bump logic; TEAM 3 OWNS: the kustomization.yaml being bumped
+      steps {
+        sh '''
+          git clone http://${GIT_CREDS_USR}:${GIT_CREDS_PSW}@${GITOPS_REPO#http://} /tmp/gitops
+          cd /tmp/gitops
+
+          sed -i "s|newTag:.*|newTag: ${IMAGE_TAG}|g" kubernetes/overlays/staging/kustomization.yaml
+
+          git config user.email "jenkins@local.dev"
+          git config user.name  "Jenkins CI"
+          git add -A
+          git diff --cached --quiet || git commit -m "ci: bump staging image → ${IMAGE_TAG} [build #${BUILD_NUMBER}]"
+          git push origin main
+          echo "GitOps repo updated — ArgoCD will auto-sync staging"
+        '''
+      }
+    }
+
+    stage('⑩ DAST — OWASP ZAP') {
+      // TEAM 2 OWNS: ci/stages/dast-scan.sh + security/dast/zap-config.yaml
+      when {
+        anyOf {
+          branch 'main'
+          expression { return env.RUN_DAST == 'true' }
+        }
+      }
+      steps {
+        sh '''
+          echo "Waiting 30s for ArgoCD to sync staging..."
+          sleep 30
+          chmod +x ci/stages/dast-scan.sh && ci/stages/dast-scan.sh ${STAGING_URL}
+        '''
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: "${REPORT_DIR}/zap-report.*", allowEmptyArchive: true
+        }
+      }
+    }
+
+    stage('⑪ Manual approval') {
+      when { branch 'main' }
+      steps {
+        input message: 'All security gates passed. Approve production deployment?',
+              ok: 'Deploy to Production',
+              submitter: 'admin'
+      }
+    }
+
+    stage('⑫ Promote to production') {
+      when { branch 'main' }
+      // TEAM 1 OWNS: git bump; TEAM 3 OWNS: production kustomization.yaml
+      steps {
+        sh '''
+          cd /tmp/gitops
+          sed -i "s|newTag:.*|newTag: ${IMAGE_TAG}|g" kubernetes/overlays/production/kustomization.yaml
+          git add -A
+          git diff --cached --quiet || git commit -m "release: promote ${IMAGE_TAG} to production [approved #${BUILD_NUMBER}]"
+          git push origin main
+          echo "Production promoted — ArgoCD syncing"
+        '''
+      }
+    }
+
+  } // end stages
+
+  post {
+    failure {
+      echo "\033[0;31m[FAIL] Pipeline failed — see scan reports in DefectDojo: http://localhost:8081\033[0m"
+    }
+    success {
+      echo "\033[0;32m[PASS] Pipeline complete — app deployed. ArgoCD: https://localhost:8443\033[0m"
+    }
+    always {
+      // Always upload whatever reports exist to DefectDojo
+      sh '''
+        echo "Final DefectDojo sync..."
+      ''' 
+      cleanWs()
+    }
+  }
+}

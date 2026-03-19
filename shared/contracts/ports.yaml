@@ -1,0 +1,101 @@
+# =============================================================================
+# shared/contracts/ports.yaml
+#
+# THE single source of truth for all service ports.
+# Nobody hardcodes ports anywhere else.
+#
+# If you need to change a port:
+#   1. Change it here
+#   2. Open a PR — all 3 must approve
+#   3. Update your own compose file to match
+# =============================================================================
+
+services:
+
+  # ── Linh ───────────────────────────────────────
+  jenkins:
+    host_port: 8080
+    container_port: 8080
+    description: Jenkins CI web UI + API
+    owner: linh
+
+  jenkins_agent:
+    host_port: 50000
+    container_port: 50000
+    description: Jenkins JNLP agent port
+    owner: linh
+
+  gitea:
+    host_port: 3000
+    container_port: 3000
+    description: Gitea SCM web UI + API
+    owner: linh
+
+  gitea_ssh:
+    host_port: 2222
+    container_port: 22
+    description: Gitea SSH
+    owner: linh
+
+  registry:
+    host_port: 5001
+    container_port: 5000
+    description: Local Docker registry
+    owner: linh
+
+  # ── My ───────────────────────────────────────
+  sonarqube:
+    host_port: 9000
+    container_port: 9000
+    description: SonarQube SAST + quality gate
+    owner: my
+
+  defectdojo:
+    host_port: 8081
+    container_port: 8080
+    description: DefectDojo security aggregation (replaces Security Hub)
+    owner: my
+
+  zap:
+    host_port: 8090
+    container_port: 8080
+    description: OWASP ZAP DAST daemon
+    owner: my
+
+  # ── Loi ───────────────────────────────────────
+  grafana:
+    host_port: 3001
+    container_port: 3000
+    description: Grafana dashboards
+    owner: Loi
+
+  prometheus:
+    host_port: 9090
+    container_port: 9090
+    description: Prometheus metrics
+    owner: Loi
+
+  loki:
+    host_port: 3100
+    container_port: 3100
+    description: Loki log aggregation
+    owner: Loi
+
+  # ── Kubernetes (k3d) ──────────────────────────────────
+  k8s_http:
+    host_port: 80
+    container_port: 80
+    description: k3d ingress HTTP
+    owner: linh
+
+  k8s_https:
+    host_port: 443
+    container_port: 443
+    description: k3d ingress HTTPS
+    owner: linh
+
+  argocd:
+    host_port: 8443
+    container_port: 443
+    description: ArgoCD HTTPS
+    owner: linh

@@ -1,0 +1,72 @@
+# =============================================================================
+# k3d cluster configuration
+# Replaces AWS EKS — free local Kubernetes
+#
+# k3d wraps k3s (lightweight Kubernetes) in Docker containers.
+# This config creates a cluster that:
+#   - Uses the local Docker registry (localhost:5001)
+#   - Exposes port 80/443 for Ingress (same as ALB in cloud)
+#   - Has 1 server + 2 agents (mimics EKS node group)
+#   - Shares the devsecops Docker network with other services
+# =============================================================================
+
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+
+metadata:
+  name: devsecops
+
+# Cluster servers (control plane) — 1 is enough for local
+servers: 1
+
+# Worker nodes — mirrors a 2-node EKS managed node group
+agents: 2
+
+# ── PORT MAPPINGS ──────────────────────────────────────────
+# Maps host ports to the k3d load balancer so Ingress works
+# Same effect as an AWS ALB in cloud
+ports:
+  - port: 80:80
+    nodeFilters:
+      - loadbalancer
+  - port: 443:443
+    nodeFilters:
+      - loadbalancer
+  - port: 8443:8443       # ArgoCD UI (HTTPS)
+    nodeFilters:
+      - loadbalancer
+
+# ── LOCAL REGISTRY ─────────────────────────────────────────
+# Connect k3d to the registry started by docker-compose.
+# k3d nodes can pull images from localhost:5001 without auth.
+# In cloud, change REGISTRY_URL to your ECR endpoint — zero
+# other changes needed.
+registries:
+  use:
+    - local-registry:5000   # container name from docker-compose
+  config: |
+    mirrors:
+      "localhost:5001":
+        endpoint:
+          - "http://local-registry:5000"
+
+# ── NODE RESOURCE LABELS ───────────────────────────────────
+# Mirror EKS node labels so Helm charts deploy identically
+options:
+  k3d:
+    wait: true
+    timeout: "120s"
+  k3s:
+    extraArgs:
+      # Disable k3s default traefik so we can install ingress-nginx
+      # (same as in EKS — we manage ingress ourselves)
+      - arg: --disable=traefik
+        nodeFilters:
+          - server:*
+      # Allow pods to pull from insecure local registry
+      - arg: --kubelet-arg=allowed-unsafe-sysctls=net.ipv4.ip_unprivileged_port_start=0
+        nodeFilters:
+          - agent:*
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: true
