@@ -6,7 +6,6 @@
 // TEAM 3 owns: app/ Dockerfile, kubernetes/ manifests, cd/ GitOps repo
 //
 // The Jenkinsfile calls Team 2's scripts as black boxes.
-// Team 2 can change scan logic without touching this file.
 //
 // Environment switching (set in Jenkins or .env):
 //   Local:  REGISTRY=localhost:5001

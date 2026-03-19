@@ -1,13 +1,11 @@
 # =============================================================================
 # docker-compose.obs.yml — OWNED BY TEAM 3 (App + CD + Observability)
 #
-# Services: Prometheus, Grafana, Loki, Promtail
 # Ports: defined in shared/contracts/ports.yaml
 #
 # Run standalone (Team 3 testing):
 #   docker compose -f docker-compose.obs.yml up -d
-#   NOTE: Requires devsecops network first:
-#         docker network create devsecops
+#   NOTE: Requires devsecops network first: docker network create devsecops
 # =============================================================================
 
 networks:
@@ -15,94 +13,6 @@ networks:
     name: ${DOCKER_NETWORK:-devsecops}
     external: true
 
-volumes:
-  grafana_data:
-  prometheus_data:
-  loki_data:
-
-services:
-
-  # ── Prometheus — Metrics collection ───────────────────
-  # Scrapes Jenkins, SonarQube, and k3d nodes
-  # Port: 9090
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: prometheus
-    restart: unless-stopped
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.retention.time=7d'
-      - '--web.enable-lifecycle'
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./monitoring/rules:/etc/prometheus/rules:ro
-      - prometheus_data:/prometheus
-    networks:
-      - devsecops
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
-      interval: 15s
-
-  # ── Grafana — Dashboards ───────────────────────────────
-  # Replaces CloudWatch dashboards
-  # Port: 3001
-  grafana:
-    image: grafana/grafana-oss:latest
-    container_name: grafana
-    restart: unless-stopped
-    depends_on:
-      - prometheus
-      - loki
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASS:-admin123}
-      GF_SERVER_HTTP_PORT: "3001"
-      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
-      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
-      GF_USERS_ALLOW_SIGN_UP: "false"
-    ports:
-      - "3001:3001"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    networks:
-      - devsecops
-
-  # ── Loki — Log aggregation ─────────────────────────────
-  # Aggregates logs from all Docker containers + k3d pods
-  # Replaces CloudWatch Logs (~$0.50/GB ingested)
-  # Port: 3100
-  loki:
-    image: grafana/loki:latest
-    container_name: loki
-    restart: unless-stopped
-    command: -config.file=/etc/loki/loki-config.yaml
-    ports:
-      - "3100:3100"
-    volumes:
-      - ./monitoring/loki-config.yaml:/etc/loki/loki-config.yaml:ro
-      - loki_data:/loki
-    networks:
-      - devsecops
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3100/ready"]
-      interval: 15s
-
-  # ── Promtail — Log shipper ────────────────────────────
-  # Tails Docker container logs and ships to Loki
-  promtail:
-    image: grafana/promtail:latest
-    container_name: promtail
-    restart: unless-stopped
-    command: -config.file=/etc/promtail/promtail-config.yaml
-    volumes:
-      - ./monitoring/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - devsecops
-    depends_on:
-      - loki
+# volumes:
+  
+# services:

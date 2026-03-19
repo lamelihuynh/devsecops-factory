@@ -2,8 +2,6 @@
 # shared/contracts/image-names.yaml
 #
 # ALL image names and tags follow this convention.
-# Team 1 sets REGISTRY in CI. Team 3 references the same name in manifests.
-# Team 2 scans the same name/tag in Trivy/Grype.
 #
 # Pattern: ${REGISTRY}/${APP_NAME}:${IMAGE_TAG}
 # Local:   localhost:5001/tetris-devsecops:<git-sha-8>

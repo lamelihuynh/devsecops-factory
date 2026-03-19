@@ -27,5 +27,5 @@ networks:
 # Include each module's compose file
 include:
   - docker-compose.infra.yml       # Module 1: Jenkins, Gitea, Registry
-  - docker-compose.security.yml    # Module 2: SonarQube, DefectDojo, ZAP
-  - docker-compose.obs.yml         # Module 3: Prometheus, Grafana, Loki
+  - docker-compose.security.yml    # Module 2: 
+  - docker-compose.obs.yml         # Module 3: 

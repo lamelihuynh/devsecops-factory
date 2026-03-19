@@ -44,43 +44,11 @@ services:
     owner: linh
 
   # ── My ───────────────────────────────────────
-  sonarqube:
-    host_port: 9000
-    container_port: 9000
-    description: SonarQube SAST + quality gate
-    owner: my
-
-  defectdojo:
-    host_port: 8081
-    container_port: 8080
-    description: DefectDojo security aggregation (replaces Security Hub)
-    owner: my
-
-  zap:
-    host_port: 8090
-    container_port: 8080
-    description: OWASP ZAP DAST daemon
-    owner: my
+  # Fill here 
 
   # ── Loi ───────────────────────────────────────
-  grafana:
-    host_port: 3001
-    container_port: 3000
-    description: Grafana dashboards
-    owner: Loi
-
-  prometheus:
-    host_port: 9090
-    container_port: 9090
-    description: Prometheus metrics
-    owner: Loi
-
-  loki:
-    host_port: 3100
-    container_port: 3100
-    description: Loki log aggregation
-    owner: Loi
-
+  # Fill here
+  
   # ── Kubernetes (k3d) ──────────────────────────────────
   k8s_http:
     host_port: 80

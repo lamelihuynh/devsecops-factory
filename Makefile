@@ -93,12 +93,6 @@ status: ## Show health of all services
 	@echo "$(CYAN)── Access URLs ────────────────────────────────────$(NC)"
 	@echo "  Jenkins        http://localhost:8080"
 	@echo "  Gitea          http://localhost:3000"
-	@echo "  SonarQube      http://localhost:9000    admin/admin"
-	@echo "  DefectDojo     http://localhost:8081    admin/admin123"
-	@echo "  Grafana        http://localhost:3001    admin/admin123"
-	@echo "  Prometheus     http://localhost:9090"
-	@echo "  ZAP            http://localhost:8090"
-	@echo "  ArgoCD         https://localhost:8443"
 	@echo "  Registry       localhost:5001"
 	@echo ""
 
@@ -129,24 +123,9 @@ k3d-configure: ## Export kubeconfig + install ingress-nginx
 k3d-delete: ## Delete local k3d cluster
 	k3d cluster delete devsecops
 
-##@ ArgoCD
-
-argocd-install: ## Install ArgoCD on k3d cluster
-	@export KUBECONFIG=~/.kube/devsecops-local.kubeconfig && \
-	kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f - && \
-	kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml && \
-	kubectl wait --for=condition=available deployment/argocd-server -n argocd --timeout=3m && \
-	kubectl patch svc argocd-server -n argocd -p '{"spec":{"type":"NodePort","ports":[{"port":443,"targetPort":8080,"nodePort":31443}]}}' && \
-	echo "$(GREEN)ArgoCD installed$(NC)" && \
-	echo "Password: $$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)"
-
-argocd-bootstrap: ## Apply ArgoCD app manifests
-	@export KUBECONFIG=~/.kube/devsecops-local.kubeconfig && \
-	kubectl apply -f cd/apps/
-
 ##@ Build
 
-build-agent: ## [Team 1] Build Jenkins agent image with all security tools
+build-agent: ## [Linh] Build Jenkins agent image with all security tools
 	docker build -t devsecops-agent:latest -f ci/Dockerfile.agent .
 	docker tag devsecops-agent:latest localhost:5001/devsecops-agent:latest
 	docker push localhost:5001/devsecops-agent:latest

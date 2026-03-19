@@ -1,5 +1,5 @@
 # DevSecOps Factory 
-**Linh = Team-1, My = Team 2, Loi = Team 3**
+**Linh = Team-1, My = Team-2, Loi = Team-3**
 > **Local-first, cloud-after.** 
 
 ---
