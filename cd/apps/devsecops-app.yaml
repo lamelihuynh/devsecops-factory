@@ -1,0 +1,75 @@
+---
+# =============================================================================
+# ArgoCD Application — Synchronizes Kubernetes manifest to cluster
+# =============================================================================
+# Owned by: Team 1 (Infrastructure)
+# Purpose: Automatic GitOps deployment when image tag is updated
+# Trigger: Jenkins updates image tag in kustomization.yaml → ArgoCD syncs
+#
+# Install ArgoCD first:
+#   helm repo add argocd https://argoproj.github.io/argo-helm
+#   helm install argocd argocd/argo-cd -n argocd --create-namespace
+#
+# Login to ArgoCD UI:
+#   argocd admin initial-password -n argocd
+#   argocd login <ARGOCD_SERVER> --username admin
+# =============================================================================
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: devsecops-staging
+  namespace: argocd
+spec:
+  project: default
+  
+  source:
+    repoURL: https://github.com/lamelihuynh/devsec-test.git
+    targetRevision: main
+    path: kubernetes/overlays/staging
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: staging
+  
+  syncPolicy:
+    automated:
+      prune: true      # Delete resources not in repo
+      selfHeal: true   # Re-sync if cluster drift detected
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: devsecops-production
+  namespace: argocd
+spec:
+  project: default
+  
+  source:
+    repoURL: https://github.com/lamelihuynh/devsec-test.git
+    targetRevision: main
+    path: kubernetes/overlays/production
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: production
+  
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+    # ⚠️ NO automated sync for production — manual approval required
+    # This ensures gate control before prod deployment
+  
+  # Optional: Set notifications/webhook for approval workflows
+  notifications:
+    - enabled: true

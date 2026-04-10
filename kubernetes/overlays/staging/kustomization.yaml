@@ -5,8 +5,8 @@ resources:
   - ../../base
 images:
   - name: tetris-devsecops
-    newName: localhost:5001/tetris-devsecops
-    newTag: latest   # Jenkins bumps this
+    newName: 997961584240.dkr.ecr.ap-southeast-1.amazonaws.com/devsecops/ecr
+    newTag: latest   # Jenkins bumps this after successful security scans
 patches:
   - patch: |-
       - op: replace
@@ -18,7 +18,7 @@ patches:
   - patch: |-
       - op: replace
         path: /spec/rules/0/host
-        value: tetris-staging.localhost
+        value: tetris-staging.example.com
     target:
       kind: Ingress
       name: tetris

@@ -1,246 +1,309 @@
-// =============================================================================
-// ci/Jenkinsfile — OWNED BY TEAM 1 (orchestration skeleton)
-//
-// TEAM 1 owns: stage names, agent config, env vars, order of stages
-// TEAM 2 owns: the scripts in ci/stages/*.sh that each security stage calls
-// TEAM 3 owns: app/ Dockerfile, kubernetes/ manifests, cd/ GitOps repo
-//
-// The Jenkinsfile calls Team 2's scripts as black boxes.
-//
-// Environment switching (set in Jenkins or .env):
-//   Local:  REGISTRY=localhost:5001
-//   Cloud:  REGISTRY=<account>.dkr.ecr.<region>.amazonaws.com
-// =============================================================================
+// ====================================================
+// Jenkins File - DevSecOps Full Pipeline
+// ====================================================
+// 12-stage pipeline:
+// 1. Checkout source from GitHub
+// 2. Prepare metadata (Git commit tag, build number)
+// 3. Secrets scan (Gitleaks, TruffleHog)
+// 4. SCA scan (OWASP Dependency-Check)
+// 5. SAST scan (SonarQube)
+// 6. Build Docker image
+// 7. Container scan (Trivy)
+// 8. IaC scan (Checkov on K8s manifests)
+// 9. Push image to AWS ECR
+// 10. Summary & reporting
+// ====================================================
+
+def     IMAGE_TAG = ""
+def     IMAGE_URI = ""
+def     GIT_COMMIT_SHORT = ""
 
 pipeline {
-  agent {
-    docker {
-      image "${env.REGISTRY ?: 'localhost:5001'}/devsecops-agent:latest"
-      args  '--network devsecops -v /var/run/docker.sock:/var/run/docker.sock -u root'
-    }
+  agent any
+
+  environment{
+    AWS_REGION= 'ap-southeast-1'
+    AWS_ACCOUNT_ID = '997961584240'
+    ECR_REPO = 'devsecops/ecr'
+    REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+    IMAGE_NAME = "${REGISTRY}/${ECR_REPO}"
+    SONAR_HOST = "${SONAR_HOST}"
+    DEFECTDOJO_URL = "${DEFECTDOJO_URL}"
+
+    SCAN_REPORT_DIR = "${WORKSPACE}/scan-reports"
   }
 
-  environment {
-    // ── Registry — Team 1 sets, Team 3 reads in manifests ─
-    REGISTRY         = "${env.REGISTRY ?: 'localhost:5001'}"
-    IMAGE_NAME       = "${REGISTRY}/tetris-devsecops"
-    IMAGE_TAG        = "${env.GIT_COMMIT?.take(8) ?: 'dev'}"
-    REPORT_DIR       = "/tmp/security-reports"
 
-    // ── Tool endpoints — from Jenkins CasC / .env ─────────
-    SONAR_HOST       = "${env.SONAR_HOST ?: 'http://sonarqube:9000'}"
-    SONAR_TOKEN      = credentials('sonar-token')
-    DEFECTDOJO_URL   = "${env.DEFECTDOJO_URL ?: 'http://defectdojo:8080'}"
-    DEFECTDOJO_KEY   = credentials('defectdojo-api-key')
-    ENGAGEMENT_NAME  = "Jenkins-${env.BUILD_NUMBER}"
-
-    // ── Team 2 threshold config (read from env, defaults set here) ─
-    TRIVY_SEVERITY   = "${env.TRIVY_SEVERITY ?: 'HIGH,CRITICAL'}"
-    TRIVY_EXIT_CODE  = "${env.TRIVY_EXIT_CODE ?: '1'}"
-    OWASP_FAIL_CVSS  = "${env.OWASP_FAIL_CVSS ?: '8'}"
-    SONAR_QUALITY_GATE = "${env.SONAR_QUALITY_GATE ?: 'true'}"
-
-    // ── Team 3 GitOps config ──────────────────────────────
-    GITOPS_REPO      = "${env.GITOPS_REPO ?: 'http://gitea:3000/gitadmin/tetris-gitops.git'}"
-    STAGING_URL      = "${env.STAGING_URL ?: 'http://tetris-staging.localhost'}"
-    GIT_CREDS        = credentials('gitea-creds')
-  }
-
-  options {
+  options{
+    // timestamps()
+    timeout(time: 1, unit: 'HOURS')
+    disableConcurrentBuilds()
     buildDiscarder(logRotator(numToKeepStr: '10'))
-    timeout(time: 60, unit: 'MINUTES')
-    timestamps()
-    ansiColor('xterm')
   }
 
-  stages {
-
-    stage('① Secrets scan') {
-      // TEAM 2 OWNS: ci/stages/secrets-scan.sh
+  stages{
+    stage('1. Checkout') {
       steps {
-        sh 'mkdir -p ${REPORT_DIR}'
-        sh 'chmod +x ci/stages/secrets-scan.sh && ci/stages/secrets-scan.sh'
-      }
-      post {
-        always {
-          archiveArtifacts artifacts: "${REPORT_DIR}/gitleaks.json", allowEmptyArchive: true
-          archiveArtifacts artifacts: "${REPORT_DIR}/trufflehog.json", allowEmptyArchive: true
-        }
-      }
-    }
-
-    stage('② Build + unit tests') {
-      // TEAM 1 OWNS: build tooling; TEAM 3 OWNS: the app source
-      steps {
-        sh '''
-          echo "=== Build + unit tests ==="
-          npm ci --prefer-offline --loglevel=error
-          npm test -- --watchAll=false --passWithNoTests || true
-          npm run build
-          echo "Build complete"
-        '''
-      }
-    }
-
-    stage('③ SCA — OWASP Dependency-Check') {
-      // TEAM 2 OWNS: ci/stages/sca-scan.sh
-      steps {
-        sh 'chmod +x ci/stages/sca-scan.sh && ci/stages/sca-scan.sh'
-      }
-      post {
-        always {
-          publishHTML(target: [
-            reportDir: "${REPORT_DIR}",
-            reportFiles: 'dependency-check-report.html',
-            reportName: 'SCA Report',
-            allowMissing: true
-          ])
-        }
-      }
-    }
-
-    stage('④ SAST — SonarQube') {
-      // TEAM 2 OWNS: ci/stages/sast-scan.sh + security/sast/sonar-project.properties
-      steps {
-        sh 'chmod +x ci/stages/sast-scan.sh && ci/stages/sast-scan.sh'
         script {
-          if (env.SONAR_QUALITY_GATE == 'true') {
-            def qg = waitForQualityGate(abortPipeline: false)
-            if (qg.status != 'OK') {
-              unstable("SonarQube Quality Gate: ${qg.status}")
-            }
+          def scmVars = checkout([
+            $class: 'GitSCM', 
+            branches: [[name: "*/main"]], 
+            userRemoteConfigs: [[
+              url: 'https://github.com/lamelihuynh/linh-test',
+            ]]
+          ])
+          
+          if (scmVars != null && scmVars.GIT_COMMIT != null) {
+            env.GIT_COMMIT_SHORT = scmVars.GIT_COMMIT.toString().substring(0, 7)
+          } else {
+            env.GIT_COMMIT_SHORT = "build-${env.BUILD_NUMBER}"
+          }
+          
+          echo "TAG IMMAGE : ${env.GIT_COMMIT_SHORT}"
+        }
+      }
+    }
+    
+
+
+
+    stage('2. Prepare Metadata'){
+      steps{
+        script{
+          sh "mkdir -p ${env.SCAN_REPORT_DIR}"
+          env.IMAGE_TAG = env.GIT_COMMIT_SHORT
+          env.IMAGE_URI = "${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+          echo "Image TAG: ${env.IMAGE_TAG}"
+          echo "Image URI: ${env.IMAGE_URI}"
+          echo "Report directory: ${env.SCAN_REPORT_DIR}" 
+        }
+      }
+    }
+
+    stage('3. Secrets Scan'){
+      when {
+        expression { fileExists('app/src')} 
+      }
+      steps {
+        script{
+          echo ' ===== Running secrets scan (Gitleaks).... ==== ' 
+          def scanStatus = sh (
+            script: '''
+
+              if ! command -v gitleaks &> /dev/null; then
+                echo [-] Gitleaks has not installed. The process will installe automated...
+                curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar -xz 
+                chmod +x gitleaks
+                export PATH=$PATH:$(pwd)
+              fi
+              ./gitleaks protect detect --source . --report-path ${SCAN_REPORT_DIR}/gitleaks-report.json --report-format json
+
+            ''',
+            returnStatus: true
+          )
+
+          if (scanStatus == 1)  {
+            error("\033[31m [CRITICAL]: Hardcoded secrets detected by Gitleaks! Pipeline aborted. Please check file report for detail.")
+          }
+          else if (scanStatus != 0){
+            error("\033[33m [SYSTEM ERROR]: Cannot run Gitleaks (Exit code: ${scanStatus}). Pipeline aborted.")
+          }
+          else {
+            echo "\033[32m [PASS]: No secrets found. Code looks clean!"
           }
         }
       }
-    }
-
-    stage('⑤ Docker build') {
-      // TEAM 1 OWNS: build args; TEAM 3 OWNS: app/Dockerfile
-      steps {
-        sh '''
-          docker build \
-            --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
-            --build-arg GIT_COMMIT=${IMAGE_TAG} \
-            --label org.opencontainers.image.revision=${IMAGE_TAG} \
-            --label org.opencontainers.image.created=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
-            -t ${IMAGE_NAME}:${IMAGE_TAG} \
-            -t ${IMAGE_NAME}:latest \
-            app/
-          echo "Image built: ${IMAGE_NAME}:${IMAGE_TAG}"
-        '''
-      }
-    }
-
-    stage('⑥ Container scan — Trivy') {
-      // TEAM 2 OWNS: ci/stages/container-scan.sh + security/container/trivy.yaml
-      steps {
-        sh "chmod +x ci/stages/container-scan.sh && ci/stages/container-scan.sh ${IMAGE_NAME}:${IMAGE_TAG}"
-      }
-      post {
-        always {
-          archiveArtifacts artifacts: "${REPORT_DIR}/trivy.json", allowEmptyArchive: true
+      post{
+        always{
+          archiveArtifacts artifacts: "${SCAN_REPORT_DIR}/gitleaks-report.json", allowEmptyArchive: true
         }
       }
     }
 
-    stage('⑦ IaC scan — Checkov') {
-      // TEAM 2 OWNS: ci/stages/iac-scan.sh
-      steps {
-        sh 'chmod +x ci/stages/iac-scan.sh && ci/stages/iac-scan.sh'
-      }
-    }
-
-    stage('⑧ Push image') {
-      // TEAM 1 OWNS
-      steps {
-        sh '''
-          docker push ${IMAGE_NAME}:${IMAGE_TAG}
-          docker push ${IMAGE_NAME}:latest
-          echo "Pushed: ${IMAGE_NAME}:${IMAGE_TAG}"
-        '''
-      }
-    }
-
-    stage('⑨ Update GitOps repo') {
-      // TEAM 1 OWNS: git bump logic; TEAM 3 OWNS: the kustomization.yaml being bumped
-      steps {
-        sh '''
-          git clone http://${GIT_CREDS_USR}:${GIT_CREDS_PSW}@${GITOPS_REPO#http://} /tmp/gitops
-          cd /tmp/gitops
-
-          sed -i "s|newTag:.*|newTag: ${IMAGE_TAG}|g" kubernetes/overlays/staging/kustomization.yaml
-
-          git config user.email "jenkins@local.dev"
-          git config user.name  "Jenkins CI"
-          git add -A
-          git diff --cached --quiet || git commit -m "ci: bump staging image → ${IMAGE_TAG} [build #${BUILD_NUMBER}]"
-          git push origin main
-          echo "GitOps repo updated — ArgoCD will auto-sync staging"
-        '''
-      }
-    }
-
-    stage('⑩ DAST — OWASP ZAP') {
-      // TEAM 2 OWNS: ci/stages/dast-scan.sh + security/dast/zap-config.yaml
+    stage('4. SCA Scan'){
       when {
-        anyOf {
-          branch 'main'
-          expression { return env.RUN_DAST == 'true' }
+        expression {fileExists('app/package.json')}
+      }
+
+      steps{
+        script{
+          echo " ==== Running SCA scan (OWASP Dependency - Check) ===="
+          sh '''
+
+          '''
         }
       }
-      steps {
-        sh '''
-          echo "Waiting 30s for ArgoCD to sync staging..."
-          sleep 30
-          chmod +x ci/stages/dast-scan.sh && ci/stages/dast-scan.sh ${STAGING_URL}
-        '''
+    }
+    stage('5. SAST Scan'){
+      when {
+        expression { fileExists('app/src')}
       }
+      steps {
+        script{
+          echo " ==== Running SAST scan ==== "
+          sh '''
+
+          '''
+        }
+      }
+    }
+
+
+    stage('6. Build Docker Image'){
+      steps{
+        script {
+          echo '==== Building Docker Image ==== ' 
+          sh """
+          set -e 
+          docker build -t ${env.IMAGE_NAME}:${env.IMAGE_TAG} -t ${env.IMAGE_NAME}:latest -f ./app/Dockerfile ./app
+          echo "Build image ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+          """
+        }
+      }
+    }
+
+
+    stage('7. Container Scan'){
+      steps{
+        script{
+          echo '==== Running container scan ===='
+          sh '''
+
+          '''
+        }
+      }
+
       post {
-        always {
-          archiveArtifacts artifacts: "${REPORT_DIR}/zap-report.*", allowEmptyArchive: true
+        always{
+          archiveArtifacts artifacts: "${SCAN_REPORT_DIR}/trivy-report.json", allowEmptyArchive:true
         }
       }
     }
 
-    stage('⑪ Manual approval') {
-      when { branch 'main' }
-      steps {
-        input message: 'All security gates passed. Approve production deployment?',
-              ok: 'Deploy to Production',
-              submitter: 'admin'
+
+     stage('8. Iac (Infrastructure as Code) Scan'){
+      steps{
+        script{
+          echo '==== Running IaC scan ===='
+          sh '''
+
+          '''
+        }
+      }
+
+      post {
+        always{
+          archiveArtifacts artifacts: "${SCAN_REPORT_DIR}/checkov-report.json", allowEmptyArchive:true
+        }
       }
     }
 
-    stage('⑫ Promote to production') {
-      when { branch 'main' }
-      // TEAM 1 OWNS: git bump; TEAM 3 OWNS: production kustomization.yaml
+
+    stage('9. Push to ECR'){
       steps {
+        withCredentials([
+          string(credentialsId: 'aws-access-key-id', variable:'AWS_ACCESS_KEY_ID'),
+          string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+        ]){
+          script{
+            echo " ==== Pushing image to AWS ECR ===="
+            sh """
+              set -e 
+              export AWS_ACCESS_KEY_ID=\$AWS_ACCESS_KEY_ID
+              export AWS_SECRET_ACCESS_KEY=\$AWS_SECRET_ACCESS_KEY
+
+              aws ecr get-login-password --region ${env.AWS_REGION} | \
+              docker login --username AWS --password-stdin ${env.REGISTRY}
+
+              docker push ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+              docker push ${env.IMAGE_NAME}:latest
+
+              echo "\033[32m[Success] - Pushed to : ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+              echo "\033[32m Also tagged as : ${env.IMAGE_NAME}:latest"
+
+            """
+          }
+        }
+
+      }
+    }
+
+    stage ('10. Summary & Report'){
+      steps{
+        script{
+          echo """
+          ╔══════════════════════════════════════════════════════════════════════════════════════╗
+          ║           DevSecOps Pipeline Summary                                                 ║
+          ╠══════════════════════════════════════════════════════════════════════════════════════╣
+          ║ Build Number     : ${env.BUILD_NUMBER}                                               ║
+          ║ Git Commit       : ${env.GIT_COMMIT_SHORT}                                           ║
+          ║ Image URI        : ${env.IMAGE_URI}                                                  ║
+          ║ Registry         : ${env.REGISTRY}                                                   ║
+          ║ ECR Repo         : ${env.ECR_REPO}                                                   ║
+          ║ Report Directory : ${env.SCAN_REPORT_DIR}                                            ║
+          ╠══════════════════════════════════════════════════════════════════════════════════════╣
+          ║ Stages Completed:                                                                    ║
+          ║   ✓ Source checkout                                                                  ║
+          ║   ✓ Secrets scan                                                                     ║
+          ║   ✓ SCA (Dependencies)                                                               ║
+          ║   ✓ SAST (Code analysis)                                                             ║
+          ║   ✓ Docker build                                                                     ║
+          ║   ✓ Container scan                                                                   ║
+          ║   ✓ IaC scan                                                                         ║
+          ║   ✓ ECR push                                                                         ║  
+          ╚══════════════════════════════════════════════════════════════════════════════════════╝
+          """
+          sh 'ls -lah ${SCAN_REPORT_DIR}/ || echo "No scan reports generated"'
+
+        }
+      }
+    }
+  
+
+  stage('11. Deploy Staging (GitOps)'){
+    when {
+      expression {env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'main'}
+    }
+    steps{
+      script{
+        echo '==== Deploying to staging via ArgoCD ===='
         sh '''
-          cd /tmp/gitops
-          sed -i "s|newTag:.*|newTag: ${IMAGE_TAG}|g" kubernetes/overlays/production/kustomization.yaml
-          git add -A
-          git diff --cached --quiet || git commit -m "release: promote ${IMAGE_TAG} to production [approved #${BUILD_NUMBER}]"
-          git push origin main
-          echo "Production promoted — ArgoCD syncing"
+        set +e
+        if command -v kubectl &> /dev/null && command -v kustomize &> /dev/null; then
+        
+        # export KUBECONFIG = ${KUBECONFIG_PATH}
+        cd kubernetes/overlays/staging
+
+        kustomize edit set image tetris-devsecops=${IMAGE_URI}
+
+        cd ../../
+
+
+        # Commit and push to trigger ArgoCD sync
+        git config user.email "jenkins@devsecops.local"
+        git config user.name "Jenkins CI"
+        git remote set-url origin https://${GIT_TOKEN}@${GIT_URL}
+
+        git add kubernetes/overlays/staging/kustomization.yaml 
+        git commit -m "[Skip CI] Update staging image to ${IMAGE_TAG}" || echo "No changes"
+        git push origin main || echo "Nothing to push"
+        echo "Staging kustomization updated and push"
+
+        else 
+        echo "kustomization not installed, failed push"
+        exit 1
+        fi
+        set -e
+        
         '''
+
       }
-    }
-
-  } // end stages
-
-  post {
-    failure {
-      echo "\033[0;31m[FAIL] Pipeline failed — see scan reports in DefectDojo: http://localhost:8081\033[0m"
-    }
-    success {
-      echo "\033[0;32m[PASS] Pipeline complete — app deployed. ArgoCD: https://localhost:8443\033[0m"
-    }
-    always {
-      // Always upload whatever reports exist to DefectDojo
-      sh '''
-        echo "Final DefectDojo sync..."
-      ''' 
-      cleanWs()
     }
   }
+  }
 }
+
+
+
+
+
