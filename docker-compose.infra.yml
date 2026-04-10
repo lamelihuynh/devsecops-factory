@@ -1,7 +1,7 @@
 # =============================================================================
-# docker-compose.infra.yml — OWNED BY TEAM 1 (Infrastructure + CI/CD)
+# docker-compose.infra.yml — Owner by Nhat linh (Infrastructure + CI/CD)
 #
-# Services: Jenkins, local Docker registry, Gitea SCM
+# Services: Jenkins CI (GitHub source + AWS ECR registry)
 # Ports: defined in shared/contracts/ports.yaml
 #
 # Run standalone (Team 1 testing):
@@ -18,88 +18,22 @@ networks:
 
 volumes:
   jenkins_home:
-  gitea_data:
-  gitea_db:
-  registry_data:
 
 services:
 
-  # ── Local Docker Registry ──────────────────────────────
-  # Replaces AWS ECR. k3d is configured to pull from here.
-  # Port: 5001 (host) → 5000 (container)
-  registry:
-    image: registry:2
-    container_name: local-registry
-    restart: unless-stopped
-    ports:
-      - "${REGISTRY_PORT:-5001}:5000"
-    volumes:
-      - registry_data:/var/lib/registry
-    networks:
-      - devsecops
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5000/v2/"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-
-  # ── Gitea — Self-hosted Git SCM ────────────────────────
-  # Replaces GitHub (offline) or AWS CodeCommit
-  # Webhooks trigger Jenkins on push
-  gitea-db:
-    image: postgres:15-alpine
-    container_name: gitea-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: gitea
-      POSTGRES_PASSWORD: gitea_pass
-      POSTGRES_DB: gitea
-    volumes:
-      - gitea_db:/var/lib/postgresql/data
-    networks:
-      - devsecops
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gitea"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  gitea:
-    image: gitea/gitea:1.21-rootless
-    container_name: gitea
-    restart: unless-stopped
-    depends_on:
-      gitea-db:
-        condition: service_healthy
-    environment:
-      USER_UID: "1000"
-      USER_GID: "1000"
-      GITEA__database__DB_TYPE: postgres
-      GITEA__database__HOST: gitea-db:5432
-      GITEA__database__NAME: gitea
-      GITEA__database__USER: gitea
-      GITEA__database__PASSWD: gitea_pass
-      GITEA__server__ROOT_URL: http://localhost:3000
-      GITEA__server__HTTP_PORT: "3000"
-      GITEA__webhook__ALLOWED_HOST_LIST: "*"
-      GITEA__security__INSTALL_LOCK: "true"
-      GITEA__service__DISABLE_REGISTRATION: "false"
-    ports:
-      - "3000:3000"
-      - "2222:22"
-    volumes:
-      - gitea_data:/var/lib/gitea
-    networks:
-      - devsecops
-
   # ── Jenkins CI ─────────────────────────────────────────
-  # Pipeline orchestrator. Jenkinsfile in ci/ drives all stages.
+  # Pipeline orchestrator. GitHub source + AWS ECR registry
   # Port: 8080 UI, 50000 agent
   jenkins:
-    image: jenkins/jenkins:lts-jdk17
     container_name: jenkins
     restart: unless-stopped
     user: root
+
+    build: 
+      context: .
+      dockerfile: ci/Dockerfile.master
+
+
     environment:
       DOCKER_HOST: unix:///var/run/docker.sock
       JAVA_OPTS: >-
@@ -117,9 +51,6 @@ services:
       - ./shared/contracts:/shared/contracts:ro
     networks:
       - devsecops
-    depends_on:
-      - registry
-      - gitea
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/login"]
       interval: 30s
