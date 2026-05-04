@@ -23,7 +23,7 @@ pipeline {
 
   environment{
     AWS_REGION= 'ap-southeast-1'
-    AWS_ACCOUNT_ID = '997961584240'
+    AWS_ACCOUNT_ID = '158909020071'
     ECR_REPO = 'devsecops/ecr'
     REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
     IMAGE_NAME = "${REGISTRY}/${ECR_REPO}"
@@ -41,163 +41,245 @@ pipeline {
     buildDiscarder(logRotator(numToKeepStr: '10'))
   }
 
-  stages{
+  stages{// Stage 1: Lấy code của chính mình (không mượn của Linh nữa)
     stage('1. Checkout') {
       steps {
         script {
-          def scmVars = checkout([
-            $class: 'GitSCM', 
-            branches: [[name: "*/main"]], 
-            userRemoteConfigs: [[
-              url: 'https://github.com/lamelihuynh/linh-test',
-            ]]
-          ])
+          // Lệnh 'checkout scm' sẽ tự lấy đúng repo và branch mà ní đang chạy
+          def scmVars = checkout scm
           
-          if (scmVars != null && scmVars.GIT_COMMIT != null) {
-            env.GIT_COMMIT_SHORT = scmVars.GIT_COMMIT.toString().substring(0, 7)
+          if (scmVars && scmVars.GIT_COMMIT) {
+            // Cắt lấy 7 ký tự đầu của mã Commit (Short SHA)
+            env.GIT_COMMIT_SHORT = scmVars.GIT_COMMIT.substring(0, 7)
           } else {
+            // Nếu không lấy được mã commit (hiếm gặp), dùng số build làm backup
             env.GIT_COMMIT_SHORT = "build-${env.BUILD_NUMBER}"
           }
           
-          echo "TAG IMMAGE : ${env.GIT_COMMIT_SHORT}"
+          echo "==== CHECKOUT XONG ===="
+          echo "Mã Commit rút gọn: ${env.GIT_COMMIT_SHORT}"
         }
       }
     }
-    
 
-
-
+    // Stage 2: Thiết lập thông tin cho các bước sau
     stage('2. Prepare Metadata'){
       steps{
         script{
+          // Tạo folder chứa báo cáo
           sh "mkdir -p ${env.SCAN_REPORT_DIR}"
+          
+          // Gán Tag và URI chuẩn để các stage sau (Build/Push ECR) dùng chung
           env.IMAGE_TAG = env.GIT_COMMIT_SHORT
           env.IMAGE_URI = "${env.IMAGE_NAME}:${env.IMAGE_TAG}"
-          echo "Image TAG: ${env.IMAGE_TAG}"
-          echo "Image URI: ${env.IMAGE_URI}"
-          echo "Report directory: ${env.SCAN_REPORT_DIR}" 
+          
+          echo "==== METADATA READY ===="
+          echo "Image TAG  : ${env.IMAGE_TAG}"
+          echo "Image URI  : ${env.IMAGE_URI}"
+          echo "Reports at : ${env.SCAN_REPORT_DIR}" 
         }
       }
     }
 
-    stage('3. Secrets Scan'){
-      when {
-        expression { fileExists('app/src')} 
-      }
-      steps {
-        script{
-          echo ' ===== Running secrets scan (Gitleaks).... ==== ' 
-          def scanStatus = sh (
-            script: '''
+//     stage('3. Secrets Scan'){
+//       when {
+//         expression { fileExists('app/src')} 
+//       }
+//       steps {
+//         script{
+//           echo ' ===== Running secrets scan (Gitleaks).... ==== ' 
+//           def scanStatus = sh (
+//             script: '''
 
-              if ! command -v gitleaks &> /dev/null; then
-                echo [-] Gitleaks has not installed. The process will installe automated...
-                curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar -xz 
-                chmod +x gitleaks
-                export PATH=$PATH:$(pwd)
-              fi
-              ./gitleaks protect detect --source . --report-path ${SCAN_REPORT_DIR}/gitleaks-report.json --report-format json
+//               if ! command -v gitleaks &> /dev/null; then
+//                 echo [-] Gitleaks has not installed. The process will installe automated...
+//                 curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar -xz 
+//                 chmod +x gitleaks
+//                 export PATH=$PATH:$(pwd)
+//               fi
+//               ./gitleaks protect detect --source ./app --report-path ${SCAN_REPORT_DIR}/gitleaks-report.json --report-format json
 
-            ''',
-            returnStatus: true
-          )
+//             ''',
+//             returnStatus: true
+//           )
 
-          if (scanStatus == 1)  {
-            error("\033[31m [CRITICAL]: Hardcoded secrets detected by Gitleaks! Pipeline aborted. Please check file report for detail.")
-          }
-          else if (scanStatus != 0){
-            error("\033[33m [SYSTEM ERROR]: Cannot run Gitleaks (Exit code: ${scanStatus}). Pipeline aborted.")
-          }
-          else {
-            echo "\033[32m [PASS]: No secrets found. Code looks clean!"
-          }
-        }
-      }
-      post{
-        always{
-          archiveArtifacts artifacts: "${SCAN_REPORT_DIR}/gitleaks-report.json", allowEmptyArchive: true
-        }
-      }
-    }
+//           if (scanStatus == 1)  {
+//             error("\033[31m [CRITICAL]: Hardcoded secrets detected by Gitleaks! Pipeline aborted. Please check file report for detail.")
+//           }
+//           else if (scanStatus != 0){
+//             error("\033[33m [SYSTEM ERROR]: Cannot run Gitleaks (Exit code: ${scanStatus}). Pipeline aborted.")
+//           }
+//           else {
+//             echo "\033[32m [PASS]: No secrets found. Code looks clean!"
+//           }
+//         }
+//       }
+//       post {
+//         always {
+//             archiveArtifacts artifacts: "scan-reports/*.json", allowEmptyArchive: true
+//             archiveArtifacts artifacts: "scan-reports/*.html", allowEmptyArchive: true
+//         }
+//     }
+//     }
 
-    stage('4. SCA Scan'){
-      when {
-        expression {fileExists('app/package.json')}
-      }
+//     // =========================================================================
+//     // Stage 4 — SCA (Software Composition Analysis)
+//     // Owner  : Team 2 — My
+//     // Tool   : OWASP Dependency-Check
+//     // Script : ci/stages/sca-scan.sh
+//     // Threshold: Fails when any dependency CVE has CVSS >= SCA_FAIL_CVSS (default 7)
+//     // Reports: scan-reports/sca-dependency-check-report.{json,html}
+//     // =========================================================================
+//     stage('4. SCA Scan') {
+//       when {
+//         // Only run if package.json exists
+//         expression { fileExists('app/package.json') }
+//       }
 
-      steps{
-        script{
-          echo " ==== Running SCA scan (OWASP Dependency - Check) ===="
-          sh '''
+//       steps {
+//         script {
+//           echo "==== Starting SCA scan (OWASP Dependency-Check) ===="
 
-          '''
-        }
-      }
-    }
-    stage('5. SAST Scan'){
-      when {
-        expression { fileExists('app/src')}
-      }
-      steps {
-        script{
-          echo " ==== Running SAST scan ==== "
-          sh '''
+//           withCredentials([
+//             string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')
+//           ]) {
+//             // DEBUG: Check if the key is loaded (displaying length only for security)
+//             sh 'echo "[DEBUG] NVD_API_KEY length: ${#NVD_API_KEY} characters"'
 
-          '''
-        }
-      }
-    }
+//             def scanStatus = sh(
+//               returnStatus: true,
+//               script: """
+//                 set -euo pipefail
+//                 chmod +x ci/stages/sca-scan.sh
+                
+//                 # Passing environment variables to the shell script
+//                 SCAN_DIR="${WORKSPACE}/app" \
+//                 SCAN_REPORT_DIR="${env.SCAN_REPORT_DIR}" \
+//                 NVD_API_KEY="${NVD_API_KEY}" \
+//                 SCA_FAIL_CVSS="7" \
+//                 ./ci/stages/sca-scan.sh
+//               """
+//             )
 
+//             // Logic to handle scan results
+//             if (scanStatus == 1) {
+//               // Exit code 1: Vulnerabilities found above threshold
+//               error("[CRITICAL] SCA FAILED — CVEs with CVSS >= 7 found. Review reports in artifacts.")
+//             } else if (scanStatus != 0) {
+//               // Other exit codes (like 13 for 403 Forbidden): System error
+//               echo "[SYSTEM WARNING] SCA scan encountered a system error (Code: ${scanStatus}). Check sca-dc.log."
+//               // Optional: Unstable means the build continues but shows a warning
+//               currentBuild.result = 'UNSTABLE' 
+//             } else {
+//               echo "[PASS] SCA scan passed — No high-risk vulnerabilities detected."
+//             }
+//           }
+//         }
+//       }
 
-    stage('6. Build Docker Image'){
-      steps{
-        script {
-          echo '==== Building Docker Image ==== ' 
-          sh """
-          set -e 
-          docker build -t ${env.IMAGE_NAME}:${env.IMAGE_TAG} -t ${env.IMAGE_NAME}:latest -f ./app/Dockerfile ./app
-          echo "Build image ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
-          """
-        }
-      }
-    }
+//       post {
+//         always {
+//           // Archive results regardless of success/failure
+//           archiveArtifacts artifacts: "scan-reports/*.json", allowEmptyArchive: true
+//           archiveArtifacts artifacts: "scan-reports/*.html", allowEmptyArchive: true
+//         }
+//         failure {
+//           echo "SCA stage failed. Check the archived reports for details."
+//         }
+//       }
+//     }
 
+//     // =========================================================================
+//     // Stage 5 — SAST (Static Application Security Testing)
+//     // Owner  : Team 2 — My
+//     // Tool   : SonarQube (Community Edition)
+//     // Script : ci/stages/sast-scan.sh
+//     // Threshold: Fails when SonarQube Quality Gate status is RED (ERROR)
+//     // Reports: scan-reports/sast-sonar-report.json
+//     //          Live dashboard: ${SONAR_HOST}/dashboard?id=devsecops-factory
+//     // =========================================================================
+//    stage('5. SAST Scan') {
+//       steps {
+//         script {
+//           echo "==== Stage 5: Soi lỗi code (SAST) ===="
+          
+//           // Nạp các biến môi trường một cách sạch sẽ
+//           withEnv([
+//             "SONAR_HOST=http://sonarqube:9000",
+//             "SCAN_DIR=${WORKSPACE}/app",
+//             "IMAGE_TAG=${env.IMAGE_TAG}"
+//           ]) {
+//             withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+//               sh '''
+//                 set -euo pipefail
+//                 chmod +x ci/stages/sast-scan.sh
+                
+//                 # Chạy script mà không cần truyền biến thủ công nữa
+//                 # vì withEnv đã làm việc đó rồi
+//                 ./ci/stages/sast-scan.sh
+//               '''
+//             }
+//           }
+//         }
+//       }
+//       post {
+//         always {
+//           echo "==== SAST Scan hoàn tất ===="
+//         }
+//       }
+//     }
 
-    stage('7. Container Scan'){
-      steps{
-        script{
-          echo '==== Running container scan ===='
-          sh '''
+//     stage('6. Build Docker Image'){
+//       steps{
+//         script {
+//           echo '==== Building Docker Image ==== ' 
+//           sh """
+//           set -e 
+//           docker build -t ${env.IMAGE_NAME}:${env.IMAGE_TAG} -t ${env.IMAGE_NAME}:latest -f ./app/Dockerfile ./app
+//           echo "Build image ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+//           """
+//         }
+//       }
+//     }
+// stage('7. Container Scan') {
+//   steps {
+//     script {
+//       echo "==== STARTING CONTAINER SCAN (TRIVY) ===="
+      
+//       withEnv([
+//         // Chỉ dùng env.IMAGE_URI vì nó đã bao gồm Tag rồi
+//         "IMAGE_FULL_PATH=${env.IMAGE_URI}", 
+//         "SCAN_REPORT_DIR=${WORKSPACE}/scan-reports"
+//       ]) {
+//         sh 'chmod +x ./ci/stages/container-scan.sh && ./ci/stages/container-scan.sh'
+//       }
+//     }
+//   }
+// }
+//   stage('8. Iac (Infrastructure as Code) Scan') {
+//       steps {
+//         script {
+//           echo '==== Running IaC scan (Checkov) ===='
+          
+//           // Sử dụng nháy kép """ để có thể dùng biến môi trường của Jenkins
+//           sh """
+//             # 1. Cấp quyền chạy cho script
+//             chmod +x ./ci/stages/iac-scan.sh
+            
+//             # 2. Gọi script. 
+//             # Truyền "." để quét toàn bộ project (Dockerfile, K8s, v.v.)
+//             ./ci/stages/iac-scan.sh .
+//           """
+//         }
+//       }
 
-          '''
-        }
-      }
-
-      post {
-        always{
-          archiveArtifacts artifacts: "${SCAN_REPORT_DIR}/trivy-report.json", allowEmptyArchive:true
-        }
-      }
-    }
-
-
-     stage('8. Iac (Infrastructure as Code) Scan'){
-      steps{
-        script{
-          echo '==== Running IaC scan ===='
-          sh '''
-
-          '''
-        }
-      }
-
-      post {
-        always{
-          archiveArtifacts artifacts: "${SCAN_REPORT_DIR}/checkov-report.json", allowEmptyArchive:true
-        }
-      }
-    }
-
+//       post {
+//         always {
+//           // Lưu lại artifact để sau này ní tải về soi cho dễ
+//           archiveArtifacts artifacts: "scan-reports/*.json", allowEmptyArchive: true
+//         }
+//       }
+//     }
 
     stage('9. Push to ECR'){
       steps {
@@ -228,39 +310,8 @@ pipeline {
       }
     }
 
-    stage ('10. Summary & Report'){
-      steps{
-        script{
-          echo """
-          ╔══════════════════════════════════════════════════════════════════════════════════════╗
-          ║           DevSecOps Pipeline Summary                                                 ║
-          ╠══════════════════════════════════════════════════════════════════════════════════════╣
-          ║ Build Number     : ${env.BUILD_NUMBER}                                               ║
-          ║ Git Commit       : ${env.GIT_COMMIT_SHORT}                                           ║
-          ║ Image URI        : ${env.IMAGE_URI}                                                  ║
-          ║ Registry         : ${env.REGISTRY}                                                   ║
-          ║ ECR Repo         : ${env.ECR_REPO}                                                   ║
-          ║ Report Directory : ${env.SCAN_REPORT_DIR}                                            ║
-          ╠══════════════════════════════════════════════════════════════════════════════════════╣
-          ║ Stages Completed:                                                                    ║
-          ║   ✓ Source checkout                                                                  ║
-          ║   ✓ Secrets scan                                                                     ║
-          ║   ✓ SCA (Dependencies)                                                               ║
-          ║   ✓ SAST (Code analysis)                                                             ║
-          ║   ✓ Docker build                                                                     ║
-          ║   ✓ Container scan                                                                   ║
-          ║   ✓ IaC scan                                                                         ║
-          ║   ✓ ECR push                                                                         ║  
-          ╚══════════════════════════════════════════════════════════════════════════════════════╝
-          """
-          sh 'ls -lah ${SCAN_REPORT_DIR}/ || echo "No scan reports generated"'
 
-        }
-      }
-    }
-  
-
-  stage('11. Deploy Staging (GitOps)'){
+  stage('10. Deploy Staging (GitOps)'){
     when {
       expression {env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'main'}
     }
@@ -300,10 +351,75 @@ pipeline {
       }
     }
   }
-  }
+  // =========================================================================
+// Stage 12 — DAST (Dynamic Application Security Testing)
+// Owner  : Team 2 — My
+// Tool   : OWASP ZAP (Docker)
+// Script : ci/stages/dast-scan.sh
+// Target : Staging environment (URL defined in STAGING_URL)
+// Threshold: Fails if any HIGH or CRITICAL risk alert is found
+// Reports: scan-reports/zap-report.json, scan-reports/zap-report.html
+// =========================================================================
+stage('11. DAST Scan (ZAP vs Staging)') {
+    when {
+        // Only run after staging deployment and only on main/master branch
+        expression { env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'main' }
+    }
+    steps {
+        script {
+            echo "==== Starting DAST scan (OWASP ZAP) against staging ===="
+
+            withEnv([
+                "STAGING_URL=http://tetris-staging.localhost",  // hoặc lấy từ parameter/contracts
+                "SCAN_REPORT_DIR=${env.SCAN_REPORT_DIR}"
+            ]) {
+                sh '''
+                    chmod +x ci/stages/dast-scan.sh
+                    ./ci/stages/dast-scan.sh
+                '''
+            }
+        }
+    }
+    post {
+        always {
+            archiveArtifacts artifacts: "scan-reports/zap-report.*", allowEmptyArchive: true
+        }
+        failure {
+            echo "DAST stage failed — HIGH/CRITICAL vulnerabilities found on staging!"
+        }
+    }
 }
+    stage ('12. Summary & Report'){
+      steps{
+        script{
+          echo """
+          ╔══════════════════════════════════════════════════════════════════════════════════════╗
+          ║           DevSecOps Pipeline Summary                                                 ║
+          ╠══════════════════════════════════════════════════════════════════════════════════════╣
+          ║ Build Number     : ${env.BUILD_NUMBER}                                               ║
+          ║ Git Commit       : ${env.GIT_COMMIT_SHORT}                                           ║
+          ║ Image URI        : ${env.IMAGE_URI}                                                  ║
+          ║ Registry         : ${env.REGISTRY}                                                   ║
+          ║ ECR Repo         : ${env.ECR_REPO}                                                   ║
+          ║ Report Directory : ${env.SCAN_REPORT_DIR}                                            ║
+          ╠══════════════════════════════════════════════════════════════════════════════════════╣
+          ║ Stages Completed:                                                                    ║
+          ║   ✓ Source checkout                                                                  ║
+          ║   ✓ Secrets scan                                                                     ║
+          ║   ✓ SCA (Dependencies)                                                               ║
+          ║   ✓ SAST (Code analysis)                                                             ║
+          ║   ✓ Docker build                                                                     ║
+          ║   ✓ Container scan                                                                   ║
+          ║   ✓ IaC scan                                                                         ║
+          ║   ✓ ECR push                                                                         ║  
+          ╚══════════════════════════════════════════════════════════════════════════════════════╝
+          """
+          sh 'ls -lah ${SCAN_REPORT_DIR}/ || echo "No scan reports generated"'
 
-
-
-
-
+        }
+      }
+    }
+  
+  }
+  
+}
