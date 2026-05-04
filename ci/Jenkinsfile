@@ -309,48 +309,50 @@ pipeline {
 
     //   }
     // }
+environment {
+    // Bỏ hoặc comment các biến AWS (nếu không dùng)
+    // AWS_REGION, AWS_ACCOUNT_ID, ECR_REPO, REGISTRY, IMAGE_NAME
+    // Thay bằng local registry:
+    LOCAL_REGISTRY = "localhost:5000"
+    IMAGE_NAME = "${LOCAL_REGISTRY}/devsecops/app"
+    // giữ lại SCAN_REPORT_DIR, SONAR_HOST, DEFECTDOJO_URL...
+}
 
-
-  stage('10. Deploy Staging (GitOps)'){
-    when {
-      expression {env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'main'}
+stage('6. Build Docker Image') {
+    steps {
+        script {
+            sh """
+            docker build -t ${env.IMAGE_NAME}:${env.IMAGE_TAG} -f ./app/Dockerfile ./app
+            """
+        }
     }
-    steps{
-      script{
-        echo '==== Deploying to staging via ArgoCD ===='
-        sh '''
-        set +e
-        if command -v kubectl &> /dev/null && command -v kustomize &> /dev/null; then
-        
-        # export KUBECONFIG = ${KUBECONFIG_PATH}
-        cd kubernetes/overlays/staging
+}
 
-        kustomize edit set image tetris-devsecops=${IMAGE_URI}
-
-        cd ../../
-
-
-        # Commit and push to trigger ArgoCD sync
-        git config user.email "jenkins@devsecops.local"
-        git config user.name "Jenkins CI"
-        git remote set-url origin https://${GIT_TOKEN}@${GIT_URL}
-
-        git add kubernetes/overlays/staging/kustomization.yaml 
-        git commit -m "[Skip CI] Update staging image to ${IMAGE_TAG}" || echo "No changes"
-        git push origin main || echo "Nothing to push"
-        echo "Staging kustomization updated and push"
-
-        else 
-        echo "kustomization not installed, failed push"
-        exit 1
-        fi
-        set -e
-        
-        '''
-
-      }
+stage('Push to Local Registry') {
+    steps {
+        script {
+            sh """
+            docker push ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+            """
+        }
     }
-  }
+}
+
+stage('Deploy Staging (GitOps)') {
+    when { branch 'main' }
+    steps {
+        script {
+            // Sửa kustomize set image: dùng local image
+            sh """
+            cd kubernetes/overlays/staging
+            kustomize edit set image tetris-devsecops=${env.IMAGE_NAME}:${env.IMAGE_TAG}
+            git add kustomization.yaml
+            git commit -m "Update staging image" || true
+            git push origin main
+            """
+        }
+    }
+}
   // =========================================================================
 // Stage 12 — DAST (Dynamic Application Security Testing)
 // Owner  : Team 2 — My
