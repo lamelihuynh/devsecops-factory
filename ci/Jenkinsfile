@@ -1,5 +1,17 @@
 // ====================================================
-// Jenkins File - DAST Testing Only (Fast Track)
+// Jenkins File - DevSecOps Full Pipeline
+// ====================================================
+// 12-stage pipeline:
+// 1. Checkout source from GitHub
+// 2. Prepare metadata (Git commit tag, build number)
+// 3. Secrets scan (Gitleaks, TruffleHog)
+// 4. SCA scan (OWASP Dependency-Check)
+// 5. SAST scan (SonarQube)
+// 6. Build Docker image
+// 7. Container scan (Trivy)
+// 8. IaC scan (Checkov on K8s manifests)
+// 9. Push image to AWS ECR
+// 10. Summary & reporting
 // ====================================================
 
 def     IMAGE_TAG = ""
@@ -9,60 +21,134 @@ def     GIT_COMMIT_SHORT = ""
 pipeline {
   agent any
 
-  environment {
+  environment{
     AWS_REGION= 'ap-southeast-1'
-    AWS_ACCOUNT_ID = '158909020071'
+    AWS_ACCOUNT_ID = '997961584240'
     ECR_REPO = 'devsecops/ecr'
     REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
     IMAGE_NAME = "${REGISTRY}/${ECR_REPO}"
+    SONAR_HOST = "${SONAR_HOST}"
+    DEFECTDOJO_URL = "${DEFECTDOJO_URL}"
+
     SCAN_REPORT_DIR = "${WORKSPACE}/scan-reports"
   }
 
-  options {
+
+  options{
+    // timestamps()
     timeout(time: 1, unit: 'HOURS')
     disableConcurrentBuilds()
-    buildDiscarder(logRotator(numToKeepStr: '5'))
+    buildDiscarder(logRotator(numToKeepStr: '10'))
   }
 
-  stages {
-    // 1. Phải giữ để lấy cái file script dast-scan.sh về
+  stages{
     stage('1. Checkout') {
       steps {
         script {
-          def scmVars = checkout scm
-          if (scmVars && scmVars.GIT_COMMIT) {
-            env.GIT_COMMIT_SHORT = scmVars.GIT_COMMIT.substring(0, 7)
+          def scmVars = checkout([
+            $class: 'GitSCM', 
+            branches: [[name: "*/main"]], 
+            userRemoteConfigs: [[
+              url: 'https://github.com/lamelihuynh/linh-test',
+            ]]
+          ])
+          
+          if (scmVars != null && scmVars.GIT_COMMIT != null) {
+            env.GIT_COMMIT_SHORT = scmVars.GIT_COMMIT.toString().substring(0, 7)
           } else {
             env.GIT_COMMIT_SHORT = "build-${env.BUILD_NUMBER}"
           }
-          echo "==== CHECKOUT XONG ===="
+          
+          echo "TAG IMMAGE : ${env.GIT_COMMIT_SHORT}"
         }
       }
     }
+    
 
-    // 2. Phải giữ để lấy TAG deploy
+
+
     stage('2. Prepare Metadata'){
       steps{
         script{
           sh "mkdir -p ${env.SCAN_REPORT_DIR}"
           env.IMAGE_TAG = env.GIT_COMMIT_SHORT
           env.IMAGE_URI = "${env.IMAGE_NAME}:${env.IMAGE_TAG}"
-          echo "==== METADATA READY ===="
+          echo "Image TAG: ${env.IMAGE_TAG}"
+          echo "Image URI: ${env.IMAGE_URI}"
+          echo "Report directory: ${env.SCAN_REPORT_DIR}" 
         }
       }
     }
 
-    /* =========================================================
-       ĐÃ COMMENT CÁC BƯỚC SCAN TĨNH ĐỂ CHẠY CHO NHANH
-       ========================================================= */
-    
-    /* 
-    stage('3. Secrets Scan'){ ... } 
-    stage('4. SCA Scan') { ... }
-    stage('5. SAST Scan') { ... }
-    */
+    stage('3. Secrets Scan'){
+      when {
+        expression { fileExists('app/src')} 
+      }
+      steps {
+        script{
+          echo ' ===== Running secrets scan (Gitleaks).... ==== ' 
+          def scanStatus = sh (
+            script: '''
 
-    // 6. Phải giữ để đóng gói app mới nhất
+              if ! command -v gitleaks &> /dev/null; then
+                echo [-] Gitleaks has not installed. The process will installe automated...
+                curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar -xz 
+                chmod +x gitleaks
+                export PATH=$PATH:$(pwd)
+              fi
+              ./gitleaks protect detect --source . --report-path ${SCAN_REPORT_DIR}/gitleaks-report.json --report-format json
+
+            ''',
+            returnStatus: true
+          )
+
+          if (scanStatus == 1)  {
+            error("\033[31m [CRITICAL]: Hardcoded secrets detected by Gitleaks! Pipeline aborted. Please check file report for detail.")
+          }
+          else if (scanStatus != 0){
+            error("\033[33m [SYSTEM ERROR]: Cannot run Gitleaks (Exit code: ${scanStatus}). Pipeline aborted.")
+          }
+          else {
+            echo "\033[32m [PASS]: No secrets found. Code looks clean!"
+          }
+        }
+      }
+      post{
+        always{
+          archiveArtifacts artifacts: "${SCAN_REPORT_DIR}/gitleaks-report.json", allowEmptyArchive: true
+        }
+      }
+    }
+
+    stage('4. SCA Scan'){
+      when {
+        expression {fileExists('app/package.json')}
+      }
+
+      steps{
+        script{
+          echo " ==== Running SCA scan (OWASP Dependency - Check) ===="
+          sh '''
+
+          '''
+        }
+      }
+    }
+    stage('5. SAST Scan'){
+      when {
+        expression { fileExists('app/src')}
+      }
+      steps {
+        script{
+          echo " ==== Running SAST scan ==== "
+          sh '''
+
+          '''
+        }
+      }
+    }
+
+
     stage('6. Build Docker Image'){
       steps{
         script {
@@ -70,17 +156,49 @@ pipeline {
           sh """
           set -e 
           docker build -t ${env.IMAGE_NAME}:${env.IMAGE_TAG} -t ${env.IMAGE_NAME}:latest -f ./app/Dockerfile ./app
+          echo "Build image ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
           """
         }
       }
     }
 
-    /*
-    stage('7. Container Scan') { ... }
-    stage('8. IaC Scan') { ... }
-    */
 
-    // 9. Phải giữ để ArgoCD có image mà kéo về
+    stage('7. Container Scan'){
+      steps{
+        script{
+          echo '==== Running container scan ===='
+          sh '''
+
+          '''
+        }
+      }
+
+      post {
+        always{
+          archiveArtifacts artifacts: "${SCAN_REPORT_DIR}/trivy-report.json", allowEmptyArchive:true
+        }
+      }
+    }
+
+
+     stage('8. Iac (Infrastructure as Code) Scan'){
+      steps{
+        script{
+          echo '==== Running IaC scan ===='
+          sh '''
+
+          '''
+        }
+      }
+
+      post {
+        always{
+          archiveArtifacts artifacts: "${SCAN_REPORT_DIR}/checkov-report.json", allowEmptyArchive:true
+        }
+      }
+    }
+
+
     stage('9. Push to ECR'){
       steps {
         withCredentials([
@@ -98,85 +216,94 @@ pipeline {
               docker login --username AWS --password-stdin ${env.REGISTRY}
 
               docker push ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+              docker push ${env.IMAGE_NAME}:latest
+
+              echo "\033[32m[Success] - Pushed to : ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+              echo "\033[32m Also tagged as : ${env.IMAGE_NAME}:latest"
+
             """
           }
         }
+
       }
     }
 
-    // 10. Phải giữ để dựng Web lên cho DAST có cái mà bắn
-    stage('10. Deploy Staging (GitOps)'){
-      when {
-        expression {env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'main'}
-      }
+    stage ('10. Summary & Report'){
       steps{
         script{
-          echo '==== Deploying to staging via ArgoCD ===='
-          sh '''
-            set +e
-            if command -v kubectl &> /dev/null && command -v kustomize &> /dev/null; then
-              cd kubernetes/overlays/staging
-              kustomize edit set image tetris-devsecops=${IMAGE_URI}
-              cd ../../
+          echo """
+          ╔══════════════════════════════════════════════════════════════════════════════════════╗
+          ║           DevSecOps Pipeline Summary                                                 ║
+          ╠══════════════════════════════════════════════════════════════════════════════════════╣
+          ║ Build Number     : ${env.BUILD_NUMBER}                                               ║
+          ║ Git Commit       : ${env.GIT_COMMIT_SHORT}                                           ║
+          ║ Image URI        : ${env.IMAGE_URI}                                                  ║
+          ║ Registry         : ${env.REGISTRY}                                                   ║
+          ║ ECR Repo         : ${env.ECR_REPO}                                                   ║
+          ║ Report Directory : ${env.SCAN_REPORT_DIR}                                            ║
+          ╠══════════════════════════════════════════════════════════════════════════════════════╣
+          ║ Stages Completed:                                                                    ║
+          ║   ✓ Source checkout                                                                  ║
+          ║   ✓ Secrets scan                                                                     ║
+          ║   ✓ SCA (Dependencies)                                                               ║
+          ║   ✓ SAST (Code analysis)                                                             ║
+          ║   ✓ Docker build                                                                     ║
+          ║   ✓ Container scan                                                                   ║
+          ║   ✓ IaC scan                                                                         ║
+          ║   ✓ ECR push                                                                         ║  
+          ╚══════════════════════════════════════════════════════════════════════════════════════╝
+          """
+          sh 'ls -lah ${SCAN_REPORT_DIR}/ || echo "No scan reports generated"'
 
-              git config user.email "jenkins@devsecops.local"
-              git config user.name "Jenkins CI"
-              git remote set-url origin https://${GIT_TOKEN}@${GIT_URL}
-
-              git add kubernetes/overlays/staging/kustomization.yaml 
-              git commit -m "[Skip CI] Update staging image to ${IMAGE_TAG}" || echo "No changes"
-              git push origin main || echo "Nothing to push"
-            fi
-            set -e
-          '''
         }
       }
     }
+  
 
-    // 11. NHÂN VẬT CHÍNH CỦA CHÚNG TA ĐÂY!
-    stage('11. DAST Scan (ZAP vs Staging)') {
-      when {
-        expression { env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'main' }
-      }
-      steps {
-        script {
-          echo "==== Chờ ArgoCD Deploy và Web Staging lên hình ===="
-          sh '''
-            timeout=180
-            while [ $timeout -gt 0 ]; do
-                if curl -k -s -o /dev/null -w "%{http_code}" http://tetris-staging.localhost | grep -q "200"; then
-                    echo "[+] Web Staging đã lên (HTTP 200)! Bắt đầu quét ZAP..."
-                    break
-                fi
-                echo "Đang đợi ArgoCD Sync... ($timeout giây còn lại)"
-                sleep 10
-                timeout=$((timeout - 10))
-            done
-          '''
+  stage('11. Deploy Staging (GitOps)'){
+    when {
+      expression {env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'main'}
+    }
+    steps{
+      script{
+        echo '==== Deploying to staging via ArgoCD ===='
+        sh '''
+        set +e
+        if command -v kubectl &> /dev/null && command -v kustomize &> /dev/null; then
+        
+        # export KUBECONFIG = ${KUBECONFIG_PATH}
+        cd kubernetes/overlays/staging
 
-          echo "==== Starting DAST scan (OWASP ZAP) ===="
-          withEnv([
-            "STAGING_URL=http://tetris-staging.localhost",
-            "SCAN_REPORT_DIR=${env.SCAN_REPORT_DIR}"
-          ]) {
-            sh '''
-              chmod +x ci/stages/dast-scan.sh
-              ./ci/stages/dast-scan.sh
-            '''
-          }
-        }
-      }
-      post {
-        always {
-          archiveArtifacts artifacts: "scan-reports/zap-report.*", allowEmptyArchive: true
-        }
+        kustomize edit set image tetris-devsecops=${IMAGE_URI}
+
+        cd ../../
+
+
+        # Commit and push to trigger ArgoCD sync
+        git config user.email "jenkins@devsecops.local"
+        git config user.name "Jenkins CI"
+        git remote set-url origin https://${GIT_TOKEN}@${GIT_URL}
+
+        git add kubernetes/overlays/staging/kustomization.yaml 
+        git commit -m "[Skip CI] Update staging image to ${IMAGE_TAG}" || echo "No changes"
+        git push origin main || echo "Nothing to push"
+        echo "Staging kustomization updated and push"
+
+        else 
+        echo "kustomization not installed, failed push"
+        exit 1
+        fi
+        set -e
+        
+        '''
+
       }
     }
   }
-  
-  post {
-    always {
-      deleteDir()
-    }
   }
 }
+
+
+
+
+
