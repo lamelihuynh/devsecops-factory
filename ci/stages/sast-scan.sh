@@ -23,10 +23,22 @@ chmod +x "${TOOL_HOME}/bin/sonar-scanner"
 chmod +x "${TOOL_HOME}/jre/bin/java"
 
 echo "[*] Running scan..."
+
+# Cưỡng chế quét vào thư mục target-repo (nơi chứa code chatapp ní vừa clone về)
+# Nếu không thấy thư mục này, nó sẽ quay về quét thư mục hiện tại (.)
+SCAN_TARGET="target-repo"
+if [ ! -d "$SCAN_TARGET" ]; then
+    SCAN_TARGET="."
+fi
+
+echo "[*] Scanning $SCAN_TARGET"
+
 "${TOOL_HOME}/bin/sonar-scanner" \
   -Dsonar.projectKey="devsecops-factory" \
-  -Dsonar.sources="${SCAN_DIR:-app/src}" \
+  -Dsonar.sources="$SCAN_TARGET" \
   -Dsonar.host.url="${SONAR_HOST}" \
   -Dsonar.login="${SONAR_TOKEN}" \
   -Dsonar.qualitygate.wait=true \
-  -Dsonar.projectVersion="${IMAGE_TAG:-latest}"
+  -Dsonar.projectVersion="${IMAGE_TAG:-latest}" \
+  -Dsonar.scm.disabled=true \
+  -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
