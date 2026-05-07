@@ -172,21 +172,24 @@ pipeline {
         }
 
         stage('10. DAST Scan (ZAP)') {
-            steps {
-                script {
-                    echo "==== Starting DAST scan (Web Attack) ===="
-                    withEnv(["STAGING_URL=http://localhost:8081", "SCAN_REPORT_DIR=${env.SCAN_REPORT_DIR}"]) {
-                        sh 'chmod +x ci/stages/dast-scan.sh && ./ci/stages/dast-scan.sh'
-                    }
-                }
-            }
-            post {
-                always {
-                    archiveArtifacts artifacts: "scan-reports/zap-report.*", allowEmptyArchive: true
-                    sh "docker rm -f staging-app-local || true"
-                }
-            }
+      steps {
+        script {
+          echo "==== Starting DAST scan (Web Attack) ===="
+          // Chỉ cần truyền SCAN_REPORT_DIR là đủ, 
+          // vì STAGING_URL mình sẽ tự lấy động bằng lệnh docker inspect trong file .sh
+          withEnv(["SCAN_REPORT_DIR=${env.SCAN_REPORT_DIR}"]) {
+            sh 'chmod +x ci/stages/dast-scan.sh && ./ci/stages/dast-scan.sh'
+          }
         }
+      }
+      post {
+        always {
+          // Lưu ý: Chỗ này ní nhớ để tên file report cho đúng với file .sh nhé
+          archiveArtifacts artifacts: "scan-reports/zap-report.*", allowEmptyArchive: true
+          sh "docker rm -f staging-app-local || true"
+        }
+      }
+    }
 
         stage('11. Final Summary') {
             steps {

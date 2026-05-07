@@ -1,25 +1,16 @@
 #!/bin/bash
-set -euo pipefail
 
-# === Cấu hình ===
-TARGET_URL="${STAGING_URL:-http://tetris-staging.localhost}"
-REPORT_DIR="${SCAN_REPORT_DIR:-scan-reports}"
-mkdir -p "$REPORT_DIR"
+# 1. Lấy IP nội bộ của container đang chạy app
+TARGET_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' staging-app-local)
 
-echo "[*] Running OWASP ZAP DAST scan against: $TARGET_URL"
-echo "[*] Reports in: $REPORT_DIR"
+echo "[*] Target App IP detected: $TARGET_IP"
 
-# Kiểm tra Docker
-if ! command -v docker &> /dev/null; then
-    echo "[ERROR] Docker not found."
-    exit 3
-fi
+# 2. Chạy ZAP quét thẳng vào cái IP đó (cổng gốc của app là 3000)
 docker run --rm \
-    --network host \
     -v "$REPORT_DIR:/zap/wrk" \
     ghcr.io/zaproxy/zaproxy:stable \
     zap-full-scan.py \
-    -t "http://localhost:8081" \
+    -t "http://$TARGET_IP:3000" \
     -r zap-report.html \
     -x zap-report.xml \
     -J zap-report.json \
