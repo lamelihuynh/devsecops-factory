@@ -118,7 +118,8 @@ pipeline {
                     ]) {
                         withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                             // Ép SonarScanner soi vào đúng thư mục target-repo
-                          sh 'chmod +x ci/stages/sast-scan.sh && ./ci/stages/sast-scan.sh -Dsonar.sources=target-repo -Dsonar.scm.disabled=true'                        }
+                          sh 'chmod +x ci/stages/sast-scan.sh && ./ci/stages/sast-scan.sh -Dsonar.sources=target-repo -Dsonar.scm.disabled=true'  
+                        archiveArtifacts artifacts: ".scannerwork/*.log", allowEmptyArchive: true                        }
                     }
                 }
             }
@@ -156,8 +157,12 @@ pipeline {
                     """
                 }
             }
-            post { always { archiveArtifacts artifacts: "scan-reports/checkov-report.json", allowEmptyArchive: true } }
+            post {
+        always {
+            // Gom file JSON kết quả của Checkov
+            archiveArtifacts artifacts: "checkov_report.json", allowEmptyArchive: true
         }
+    }}
 stage('9. Run App for DAST') {
       steps {
         script {
