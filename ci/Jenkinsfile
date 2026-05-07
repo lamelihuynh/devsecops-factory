@@ -8,8 +8,6 @@ def     GIT_COMMIT_SHORT = ""
 
 pipeline {
     agent any
-
-    // Tham số để người khác dán link repo bất kỳ vào quét
     parameters {
         string(name: 'TARGET_REPO', defaultValue: 'https://github.com/banhtieumy/chatapp.git', description: 'GitHub URL of project to scan')
         string(name: 'TARGET_BRANCH', defaultValue: 'main', description: 'Branch to checkout')
@@ -17,10 +15,8 @@ pipeline {
 
     environment {
         IMAGE_NAME = "devsecops-app-local"
-        // Gọi tên container sonarqube thay vì localhost để tránh lỗi kết nối Docker
         SONAR_HOST = "http://sonarqube:9000" 
         SCAN_REPORT_DIR = "${WORKSPACE}/scan-reports"
-        // Thư mục chứa code của con mồi
         TARGET_DIR = "${WORKSPACE}/target-repo"
     }
 
@@ -122,7 +118,7 @@ pipeline {
                     ]) {
                         withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                             // Ép SonarScanner soi vào đúng thư mục target-repo
-                            sh 'chmod +x ci/stages/sast-scan.sh && ./ci/stages/sast-scan.sh -Dsonar.sources=.'
+                            sh 'chmod +x ci/stages/sast-scan.sh && ./ci/stages/sast-scan.sh -Dsonar.scm.disabled=true'
                         }
                     }
                 }

@@ -15,16 +15,15 @@ if ! command -v docker &> /dev/null; then
     exit 3
 fi
 docker run --rm \
-    -v "$REPORT_DIR:/zap/reports" \
+    -v "$REPORT_DIR:/zap/wrk" \
     ghcr.io/zaproxy/zaproxy:stable \
     zap-full-scan.py \
     -t "$TARGET_URL" \
-    -r /zap/reports/zap-report.html \
-    -x /zap/reports/zap-report.xml \
-    -J /zap/reports/zap-report.json \
+    -r zap-report.html \
+    -x zap-report.xml \
+    -J zap-report.json \
     -m 2 \
     -T 5
-
 exit_code=$?
 
 if [ -f "$REPORT_DIR/zap-report.json" ]; then
