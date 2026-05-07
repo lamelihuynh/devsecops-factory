@@ -121,10 +121,11 @@ pipeline {
                           sh 'chmod +x ci/stages/sast-scan.sh && ./ci/stages/sast-scan.sh -Dsonar.sources=target-repo -Dsonar.scm.disabled=true'  
                         
                   archiveArtifacts artifacts: "scan-reports/sast-scan-report.*", allowEmptyArchive: true 
-          }
+                        }
                 }
             }
         }
+            }
 
         stage('6. Build Docker Image') {
             steps {
