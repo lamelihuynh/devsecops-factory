@@ -9,6 +9,7 @@ TARGET_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}
 
 # Nếu không lấy được IP, dùng tên container (Docker tự phân giải được nếu cùng network)
 TARGET_URL="http://${TARGET_IP:-staging-app-local}:3000"
+chmod -R 777 "$REPORT_DIR"
 
 echo "[*] Reports will be saved in: $REPORT_DIR"
 echo "[*] Scanning target: $TARGET_URL"
