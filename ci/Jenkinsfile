@@ -1,7 +1,3 @@
-// ====================================================
-// Jenkins File - DevSecOps Factory (MASTER VERSION)
-// ====================================================
-
 def     IMAGE_TAG = ""
 def     IMAGE_URI = ""
 def     GIT_COMMIT_SHORT = ""
@@ -38,7 +34,6 @@ pipeline {
                             userRemoteConfigs: [[ url: "${params.TARGET_REPO}" ]]
                         ])
                         
-                        // Lấy mã commit để làm Tag cho Image
                         if (scmVars && scmVars.GIT_COMMIT) {
                             env.GIT_COMMIT_SHORT = scmVars.GIT_COMMIT.substring(0, 7)
                         } else {
@@ -60,53 +55,27 @@ pipeline {
             }
         }
 
-        // stage('3. Secrets Scan') {
-        //     steps {
-        //         script {
-        //             echo '==== Running Secrets Scan (Gitleaks) ====' 
-        //             def scanStatus = sh (
-        //                 script: """
-        //                     if ! command -v gitleaks &> /dev/null; then
-        //                         curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar -xz 
-        //                         chmod +x gitleaks
-        //                         export PATH=\$PATH:\$(pwd)
-        //                     fi
-        //                     # Quét toàn bộ thư mục target-repo, bỏ qua logic git để bắt hết lỗi
-        //                     ./gitleaks detect --source ./target-repo --report-path ${env.SCAN_REPORT_DIR}/gitleaks-report.json --report-format json --no-git
-        //                 """,
-        //                 returnStatus: true
-        //             )
-        //             if (scanStatus == 1) { error("[CRITICAL] Secrets detected!") }
-        //         }
-        //     }
-        //     post { always { archiveArtifacts artifacts: "scan-reports/gitleaks-report.json", allowEmptyArchive: true } }
-        // }
-
-       stage('4. SCA Scan (Trivy FS)') {
-      // Quét nếu có bất kỳ file nào trong target-repo
-      when { expression { fileExists('target-repo') } }
-      steps {
-        script {
-          echo "==== Starting SCA scan with Trivy ===="
-          def scanStatus = sh(
-            returnStatus: true,
-            script: """
-              chmod +x ci/stages/sca-scan.sh
-              SCAN_DIR="${env.TARGET_DIR}" \
-              SCAN_REPORT_DIR="${env.SCAN_REPORT_DIR}" \
-              ./ci/stages/sca-scan.sh
-            """
-          )
-          // Trivy mặc định exit 0 trừ khi mình cấu hình --exit-code 1
-          echo "[PASS] SCA scan finished."
+        stage('4. SCA Scan (Trivy FS)') {
+            when { expression { fileExists('target-repo') } }
+            steps {
+                script {
+                    echo "==== Starting SCA scan with Trivy ===="
+                    sh """
+                        chmod +x ci/stages/sca-scan.sh
+                        SCAN_DIR="${env.TARGET_DIR}" \
+                        SCAN_REPORT_DIR="${env.SCAN_REPORT_DIR}" \
+                        ./ci/stages/sca-scan.sh
+                    """
+                    echo "==== SCA scan finished ===="
+                }
+            }
+            post { 
+                always { 
+                    archiveArtifacts artifacts: "scan-reports/trivy-sca-report.*", allowEmptyArchive: true 
+                } 
+            }
         }
-      }
-      post { 
-        always { 
-          archiveArtifacts artifacts: "scan-reports/trivy-sca-report.*", allowEmptyArchive: true 
-        } 
-      }
-    }
+
         stage('5. SAST Scan (SonarQube)') {
             steps {
                 script {
@@ -117,21 +86,22 @@ pipeline {
                         "IMAGE_TAG=${env.IMAGE_TAG}"
                     ]) {
                         withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-                            // Ép SonarScanner soi vào đúng thư mục target-repo
-                          sh 'chmod +x ci/stages/sast-scan.sh && ./ci/stages/sast-scan.sh -Dsonar.sources=target-repo -Dsonar.scm.disabled=true'  
-                        
-                  archiveArtifacts artifacts: "scan-reports/sast-scan-report.*", allowEmptyArchive: true 
+                            sh 'chmod +x ci/stages/sast-scan.sh && ./ci/stages/sast-scan.sh -Dsonar.sources=target-repo -Dsonar.scm.disabled=true' 
                         }
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: "scan-reports/sast-scan-report.*", allowEmptyArchive: true
                 }
             }
         }
-            }
 
         stage('6. Build Docker Image') {
             steps {
                 script {
-                    echo '==== Building Docker Image ====' 
-                    // Build từ context target-repo để Docker thấy được các file bên trong
+                    echo "==== Building Docker Image ====" 
                     sh "docker build -t ${env.IMAGE_URI} -f ./target-repo/Dockerfile ./target-repo"
                 }
             }
@@ -146,13 +116,17 @@ pipeline {
                     }
                 }
             }
-            post { always { archiveArtifacts artifacts: "scan-reports/container-scan-report.json", allowEmptyArchive: true } }
+            post { 
+                always { 
+                    archiveArtifacts artifacts: "scan-reports/container-scan-report.json", allowEmptyArchive: true 
+                } 
+            }
         }
 
         stage('8. IaC Scan (Checkov)') {
             steps {
                 script {
-                    echo '==== Running Infrastructure-as-Code Scan ===='
+                    echo "==== Running Infrastructure-as-Code Scan ===="
                     sh """
                         chmod +x ./ci/stages/iac-scan.sh
                         ./ci/stages/iac-scan.sh ./target-repo
@@ -160,42 +134,43 @@ pipeline {
                 }
             }
             post {
-        always {
-            // Gom file JSON kết quả của Checkov
-            archiveArtifacts artifacts: "checkov_report.json", allowEmptyArchive: true
+                always {
+                    archiveArtifacts artifacts: "checkov_report.json", allowEmptyArchive: true
+                }
+            }
         }
-    }}
-stage('9. Run App for DAST') {
-      steps {
-        script {
-          echo "==== ĐANG DỌN DẸP CONTAINER CŨ ===="
-          // Lệnh này sẽ xóa container cũ nếu nó tồn tại, nếu không có thì cũng không báo lỗi (|| true)
-          sh "docker rm -f staging-app-local || true"
-          
-          echo "==== ĐANG CHẠY APP MỚI ===="
-          sh "docker run -d --name staging-app-local -p 8081:3000 ${env.IMAGE_URI}"
-          
-          // Cho nó nghỉ 10s để khởi động cho kịp
-          sleep 10
+
+        stage('9. Run App for DAST') {
+            steps {
+                script {
+                    echo "==== CLEANING UP PREVIOUS CONTAINERS ===="
+                    sh "docker rm -f staging-app-local || true"
+                    
+                    echo "==== STARTING STAGING APPLICATION ===="
+                    sh "docker run -d --name staging-app-local -p 8081:3000 ${env.IMAGE_URI}"
+                    
+                    echo "Waiting for application to initialize..."
+                    sleep 15
+                }
+            }
         }
-      }
-    }
-stage('10. DAST Scan (ZAP)') {
-      steps {
-        script {
-          // Phải đặt tên là REPORT_DIR để khớp với cái script .sh ở trên
-          withEnv(["REPORT_DIR=${env.SCAN_REPORT_DIR}"]) {
-            sh 'chmod +x ci/stages/dast-scan.sh && ./ci/stages/dast-scan.sh'
-          }
+
+        stage('10. DAST Scan (ZAP)') {
+            steps {
+                script {
+                    echo "==== Starting DAST scan (Web Attack) ===="
+                    withEnv(["REPORT_DIR=${env.SCAN_REPORT_DIR}"]) {
+                        sh 'chmod +x ci/stages/dast-scan.sh && ./ci/stages/dast-scan.sh'
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: "scan-reports/zap-report.*", allowEmptyArchive: true
+                    sh "docker rm -f staging-app-local || true"
+                }
+            }
         }
-      }
-      post {
-        always {
-          archiveArtifacts artifacts: "scan-reports/zap-report.*", allowEmptyArchive: true
-          sh "docker rm -f staging-app-local || true"
-        }
-      }
-    }
 
         stage('11. Final Summary') {
             steps {
