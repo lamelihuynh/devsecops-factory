@@ -9,44 +9,32 @@ echo "  DAST SCAN — OWASP ZAP"
 echo "  Target URL Container: staging-app-local"
 echo "  Report Directory    : ${REPORT_DIR}"
 echo "============================================================"
-
-# 1. Kiểm tra và tạo thư mục báo cáo, mở toang quyền để Docker ghi được file
 if [ -z "$REPORT_DIR" ]; then
     REPORT_DIR="$(pwd)/scan-reports"
 fi
 mkdir -p "$REPORT_DIR"
 chmod -R 777 "$REPORT_DIR"
-# ... (phần đầu giữ nguyên)
 
-# 2. Kiểm tra tình trạng Container
-echo "[*] Đang kiểm tra danh sách container hiện có:"
+echo "[*] Ensuring staging-app-local container is running..."
 docker ps -a --filter "name=staging-app-local"
 
-# Thử lấy IP lần nữa
 TARGET_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' staging-app-local 2>/dev/null)
 
 if [ -z "$TARGET_IP" ]; then
-    echo "[!] KHÔNG tìm thấy IP. Có thể container đã chết."
-    echo "[*] Đây là log cuối cùng của app để ní soi lỗi:"
-    docker logs staging-app-local || echo "Không có log vì container không tồn tại."
+    docker logs staging-app-local || echo "Could not retrieve logs for staging-app-local. Container might not be running."
     exit 1
 fi
-# ... (phần sau giữ nguyên)
-# 2. Lấy IP nội bộ của container app để ZAP không bị lỗi "Unknown Host"
 TARGET_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' staging-app-local)
 
 if [ -z "$TARGET_IP" ]; then
-    echo "[!] Không tìm thấy IP của staging-app-local. Kiểm tra xem container có đang chạy không?"
+    echo "[!] Error: Could not determine IP address of staging-app-local container. Is it running and healthy?"
     exit 1
 fi
 
 TARGET_URL="http://${TARGET_IP}:3000"
 echo "[*] Target App IP detected: $TARGET_IP"
-echo "[*] ZAP sẽ quét vào: $TARGET_URL"
+echo "[*] ZAP will scan: $TARGET_URL"
 
-# 3. Chạy Docker ZAP với quyền ROOT để né lỗi Permission Denied
-# --user root: Ép ZAP chạy quyền cao nhất để ghi được báo cáo vào folder của Jenkins
-# -v ...:/zap/wrk: Mount vào đúng thư mục làm việc mặc định của ZAP
 docker run --rm \
     --user root \
     -v "$REPORT_DIR:/zap/wrk:rw" \
@@ -59,12 +47,10 @@ docker run --rm \
     -m 2 \
     -T 5
 
-# 4. Kiểm tra xem file report đã được sinh ra chưa
 if [ -f "$REPORT_DIR/zap-report.html" ]; then
-    echo "[+] DAST Scan hoàn tất! Báo cáo đã nằm tại: $REPORT_DIR/zap-report.html"
-    # Trả lại quyền cho user jenkins đọc được file sau khi root tạo ra
-    chmod -R 777 "$REPORT_DIR"
+    echo "[+] DAST Scan completed! Report is located at: $REPORT_DIR/zap-report.html"
+   chmod -R 777 "$REPORT_DIR"
 else
-    echo "[!] Lỗi: ZAP chạy xong nhưng không thấy file báo cáo đâu!"
+    echo "[!] Error: ZAP finished but no report file found!"
     exit 1
 fi

@@ -3,7 +3,6 @@ set -euo pipefail
 
 echo "[*] Checking for Trivy installation..."
 
-# Tự động cài đặt Trivy nếu chưa có
 if ! command -v trivy &> /dev/null; then
     echo "[!] Trivy not found. Installing Trivy..."
     curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
