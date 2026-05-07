@@ -106,9 +106,9 @@ pipeline {
         }
       }
     }
-
-    stage('4. SCA Scan (Dependency-Check)') {
-      when { expression { fileExists('app/package.json') } }
+stage('4. SCA Scan (Dependency-Check)') {
+      // ĐÃ SỬA: Tìm package.json ở ngay thư mục gốc của chatapp
+      when { expression { fileExists('target-repo/package.json') } }
       steps {
         script {
           echo "==== Starting SCA scan ===="
@@ -117,42 +117,31 @@ pipeline {
               returnStatus: true,
               script: """
                 chmod +x ci/stages/sca-scan.sh
-                SCAN_DIR="${WORKSPACE}/app" \
+                SCAN_DIR="${WORKSPACE}/target-repo" \
                 SCAN_REPORT_DIR="${env.SCAN_REPORT_DIR}" \
                 NVD_API_KEY="${NVD_API_KEY}" \
                 SCA_FAIL_CVSS="7" \
                 ./ci/stages/sca-scan.sh
               """
             )
-            if (scanStatus == 1) {
-              error("[CRITICAL] SCA FAILED — Có thư viện dính lỗ hổng CVSS >= 7.")
-            } else {
-              echo "[PASS] SCA scan passed."
-            }
+            if (scanStatus == 1) { error("[CRITICAL] SCA FAILED.") } 
+            else if (scanStatus != 0) { echo "[WARNING] API Error." }
           }
         }
       }
-      post {
-        always {
-          archiveArtifacts artifacts: "scan-reports/*dependency-check*", allowEmptyArchive: true
-        }
-      }
+      post { always { archiveArtifacts artifacts: "scan-reports/*dependency-check*", allowEmptyArchive: true } }
     }
 
     stage('5. SAST Scan (SonarQube)') {
       steps {
         script {
-          echo "==== Starting SAST scan ===="
           withEnv([
             "SONAR_HOST=${env.SONAR_HOST}",
-            "SCAN_DIR=${WORKSPACE}/app",
+            "SCAN_DIR=${WORKSPACE}/target-repo", // ĐÃ SỬA: Trỏ vào gốc
             "IMAGE_TAG=${env.IMAGE_TAG}"
           ]) {
             withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-              sh '''
-                chmod +x ci/stages/sast-scan.sh
-                ./ci/stages/sast-scan.sh
-              '''
+              sh 'chmod +x ci/stages/sast-scan.sh && ./ci/stages/sast-scan.sh'
             }
           }
         }
@@ -165,8 +154,8 @@ pipeline {
           echo '==== Building Docker Image ====' 
           sh """
           set -e 
-          docker build -t ${env.IMAGE_URI} -f ./app/Dockerfile ./app
-          echo "Build local image success: ${env.IMAGE_URI}"
+          # ĐÃ SỬA: Build thẳng từ gốc của target-repo
+          docker build -t ${env.IMAGE_URI} -f ./target-repo/Dockerfile ./target-repo
           """
         }
       }
@@ -175,25 +164,23 @@ pipeline {
     stage('7. Container Scan (Trivy)') {
       steps {
         script {
-          echo "==== Starting Container scan ===="
-          withEnv([
-            "IMAGE_FULL_PATH=${env.IMAGE_URI}", 
-            "SCAN_REPORT_DIR=${env.SCAN_REPORT_DIR}"
-          ]) {
-            sh '''
-              chmod +x ./ci/stages/container-scan.sh
-              ./ci/stages/container-scan.sh
-            '''
+          withEnv(["IMAGE_FULL_PATH=${env.IMAGE_URI}", "SCAN_REPORT_DIR=${env.SCAN_REPORT_DIR}"]) {
+            sh 'chmod +x ./ci/stages/container-scan.sh && ./ci/stages/container-scan.sh'
           }
         }
       }
-      post {
-        always{
-          archiveArtifacts artifacts: "scan-reports/trivy-report.json", allowEmptyArchive:true
-        }
-      }
+      post { always { archiveArtifacts artifacts: "scan-reports/trivy-report.json", allowEmptyArchive:true } }
     }
 
+    stage('8. IaC Scan (Checkov)') {
+      steps {
+        script {
+          # ĐÃ SỬA: Quét IaC ở thư mục gốc
+          sh 'chmod +x ./ci/stages/iac-scan.sh && ./ci/stages/iac-scan.sh ./target-repo'
+        }
+      }
+      post { always { archiveArtifacts artifacts: "scan-reports/checkov-report.json", allowEmptyArchive: true } }
+    }
     stage('8. IaC Scan (Checkov)') {
       steps {
         script {
