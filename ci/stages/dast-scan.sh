@@ -15,10 +15,11 @@ if ! command -v docker &> /dev/null; then
     exit 3
 fi
 docker run --rm \
+    --network host \
     -v "$REPORT_DIR:/zap/wrk" \
     ghcr.io/zaproxy/zaproxy:stable \
     zap-full-scan.py \
-    -t "$TARGET_URL" \
+    -t "http://localhost:8081" \
     -r zap-report.html \
     -x zap-report.xml \
     -J zap-report.json \
