@@ -158,22 +158,21 @@ pipeline {
             }
             post { always { archiveArtifacts artifacts: "scan-reports/checkov-report.json", allowEmptyArchive: true } }
         }
-
-        stage('9. Run App for DAST') {
-            steps {
-                script {
-                    echo "==== Spinning up container for dynamic testing ===="
-                    sh "docker rm -f staging-app-local || true"
-                    sh "docker run -d --name staging-app-local -p 8081:3000 ${env.IMAGE_URI}"
-                    // Chạy app và đợi 15 giây cho nó ổn định
-                  sh "docker run -d --name staging-app-local -p 8081:3000 ${env.IMAGE_URI}"
-                  echo "Waiting for app to start..."
-                  sleep 15 
-                  // Kiểm tra xem nó còn sống không
-                  sh "docker ps | grep staging-app-local"
-                }
-            }
+stage('9. Run App for DAST') {
+      steps {
+        script {
+          echo "==== ĐANG DỌN DẸP CONTAINER CŨ ===="
+          // Lệnh này sẽ xóa container cũ nếu nó tồn tại, nếu không có thì cũng không báo lỗi (|| true)
+          sh "docker rm -f staging-app-local || true"
+          
+          echo "==== ĐANG CHẠY APP MỚI ===="
+          sh "docker run -d --name staging-app-local -p 8081:3000 ${env.IMAGE_URI}"
+          
+          // Cho nó nghỉ 10s để khởi động cho kịp
+          sleep 10
         }
+      }
+    }
 stage('10. DAST Scan (ZAP)') {
       steps {
         script {
