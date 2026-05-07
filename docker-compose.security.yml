@@ -1,3 +1,37 @@
+# =============================================================================
+# docker-compose.security.yml — OWNED BY My (Security)
+#
+# Ports: defined in shared/contracts/ports.yaml
+#
+# Run standalone:
+#   docker compose -f docker-compose.security.yml up -d
+#
+# Run as part of full stack:
+#   docker compose up -d   (from repo root, includes all modules)
+# =============================================================================
+
+networks:
+  devsecops:
+    name: ${DOCKER_NETWORK:-devsecops}
+    external: true
+
+#volumes:
+  
+
+#services:
+
+  
+# =============================================================================
+# docker-compose.security.yml — OWNED BY My (Security)
+#
+# Ports: defined in shared/contracts/ports.yaml
+#
+# Run standalone:
+#   docker compose -f docker-compose.security.yml up -d
+#
+# Run as part of full stack:
+#   docker compose up -d   (from repo root, includes all modules)
+# =============================================================================
 
 version: '3.8'
 
