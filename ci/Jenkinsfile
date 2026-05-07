@@ -169,7 +169,7 @@ pipeline {
                 script {
                     echo "==== Spinning up container for dynamic testing ===="
                     sh "docker rm -f staging-app-local || true"
-                    sh "docker run -d --name staging-app-local -p 8080:3000 ${env.IMAGE_URI}"
+                    sh "docker run -d --name staging-app-local -p 8081:3000 ${env.IMAGE_URI}"
                     sleep 10 // Đợi app khởi động hẳn
                 }
             }
@@ -179,7 +179,7 @@ pipeline {
             steps {
                 script {
                     echo "==== Starting DAST scan (Web Attack) ===="
-                    withEnv(["STAGING_URL=http://localhost:8080", "SCAN_REPORT_DIR=${env.SCAN_REPORT_DIR}"]) {
+                    withEnv(["STAGING_URL=http://localhost:8081", "SCAN_REPORT_DIR=${env.SCAN_REPORT_DIR}"]) {
                         sh 'chmod +x ci/stages/dast-scan.sh && ./ci/stages/dast-scan.sh'
                     }
                 }
