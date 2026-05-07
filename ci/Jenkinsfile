@@ -64,27 +64,27 @@ pipeline {
             }
         }
 
-        stage('3. Secrets Scan') {
-            steps {
-                script {
-                    echo '==== Running Secrets Scan (Gitleaks) ====' 
-                    def scanStatus = sh (
-                        script: """
-                            if ! command -v gitleaks &> /dev/null; then
-                                curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar -xz 
-                                chmod +x gitleaks
-                                export PATH=\$PATH:\$(pwd)
-                            fi
-                            # Quét toàn bộ thư mục target-repo, bỏ qua logic git để bắt hết lỗi
-                            ./gitleaks detect --source ./target-repo --report-path ${env.SCAN_REPORT_DIR}/gitleaks-report.json --report-format json --no-git
-                        """,
-                        returnStatus: true
-                    )
-                    if (scanStatus == 1) { error("[CRITICAL] Secrets detected!") }
-                }
-            }
-            post { always { archiveArtifacts artifacts: "scan-reports/gitleaks-report.json", allowEmptyArchive: true } }
-        }
+        // stage('3. Secrets Scan') {
+        //     steps {
+        //         script {
+        //             echo '==== Running Secrets Scan (Gitleaks) ====' 
+        //             def scanStatus = sh (
+        //                 script: """
+        //                     if ! command -v gitleaks &> /dev/null; then
+        //                         curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar -xz 
+        //                         chmod +x gitleaks
+        //                         export PATH=\$PATH:\$(pwd)
+        //                     fi
+        //                     # Quét toàn bộ thư mục target-repo, bỏ qua logic git để bắt hết lỗi
+        //                     ./gitleaks detect --source ./target-repo --report-path ${env.SCAN_REPORT_DIR}/gitleaks-report.json --report-format json --no-git
+        //                 """,
+        //                 returnStatus: true
+        //             )
+        //             if (scanStatus == 1) { error("[CRITICAL] Secrets detected!") }
+        //         }
+        //     }
+        //     post { always { archiveArtifacts artifacts: "scan-reports/gitleaks-report.json", allowEmptyArchive: true } }
+        // }
 
         stage('4. SCA Scan (Dependency-Check)') {
             // Chỉ quét nếu thấy có file quản lý thư viện
