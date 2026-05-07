@@ -118,8 +118,7 @@ pipeline {
                     ]) {
                         withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                             // Ép SonarScanner soi vào đúng thư mục target-repo
-                            sh 'chmod +x ci/stages/sast-scan.sh && ./ci/stages/sast-scan.sh -Dsonar.scm.disabled=true'
-                        }
+                          sh 'chmod +x ci/stages/sast-scan.sh && ./ci/stages/sast-scan.sh -Dsonar.sources=target-repo -Dsonar.scm.disabled=true'                        }
                     }
                 }
             }
