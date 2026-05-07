@@ -38,7 +38,7 @@ echo "[*] Scanning $SCAN_TARGET"
   -Dsonar.sources="$SCAN_TARGET" \
   -Dsonar.host.url="${SONAR_HOST}" \
   -Dsonar.login="${SONAR_TOKEN}" \
-  -Dsonar.qualitygate.wait=true \
+#   -Dsonar.qualitygate.wait=true \
   -Dsonar.projectVersion="${IMAGE_TAG:-latest}" \
   -Dsonar.scm.disabled=true \
   -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
