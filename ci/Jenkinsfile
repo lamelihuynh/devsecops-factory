@@ -165,7 +165,12 @@ pipeline {
                     echo "==== Spinning up container for dynamic testing ===="
                     sh "docker rm -f staging-app-local || true"
                     sh "docker run -d --name staging-app-local -p 8081:3000 ${env.IMAGE_URI}"
-                    sleep 10 // Đợi app khởi động hẳn
+                    // Chạy app và đợi 15 giây cho nó ổn định
+                  sh "docker run -d --name staging-app-local -p 8081:3000 ${env.IMAGE_URI}"
+                  echo "Waiting for app to start..."
+                  sleep 15 
+                  // Kiểm tra xem nó còn sống không
+                  sh "docker ps | grep staging-app-local"
                 }
             }
         }
