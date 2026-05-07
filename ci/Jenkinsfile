@@ -175,29 +175,11 @@ stage('4. SCA Scan (Dependency-Check)') {
     stage('8. IaC Scan (Checkov)') {
       steps {
         script {
-          # ĐÃ SỬA: Quét IaC ở thư mục gốc
           sh 'chmod +x ./ci/stages/iac-scan.sh && ./ci/stages/iac-scan.sh ./target-repo'
         }
       }
       post { always { archiveArtifacts artifacts: "scan-reports/checkov-report.json", allowEmptyArchive: true } }
     }
-    stage('8. IaC Scan (Checkov)') {
-      steps {
-        script {
-          echo '==== Running IaC scan ===='
-          sh """
-            chmod +x ./ci/stages/iac-scan.sh
-            ./ci/stages/iac-scan.sh ./app
-          """
-        }
-      }
-      post {
-        always {
-          archiveArtifacts artifacts: "scan-reports/checkov-report.json", allowEmptyArchive: true
-        }
-      }
-    }
-
     stage('9. Run App Locally (For DAST target)') {
       steps {
         script {
