@@ -119,8 +119,9 @@ pipeline {
                         withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                             // Ép SonarScanner soi vào đúng thư mục target-repo
                           sh 'chmod +x ci/stages/sast-scan.sh && ./ci/stages/sast-scan.sh -Dsonar.sources=target-repo -Dsonar.scm.disabled=true'  
-                        archiveArtifacts artifacts: ".scannerwork/*.log", allowEmptyArchive: true                        }
-                    }
+                        
+                  archiveArtifacts artifacts: "scan-reports/sast-scan-report.*", allowEmptyArchive: true 
+          }
                 }
             }
         }
@@ -144,7 +145,7 @@ pipeline {
                     }
                 }
             }
-            post { always { archiveArtifacts artifacts: "scan-reports/trivy-report.json", allowEmptyArchive: true } }
+            post { always { archiveArtifacts artifacts: "scan-reports/container-scan-report.json", allowEmptyArchive: true } }
         }
 
         stage('8. IaC Scan (Checkov)') {
