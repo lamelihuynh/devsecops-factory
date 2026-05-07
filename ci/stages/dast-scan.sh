@@ -16,7 +16,7 @@ if ! command -v docker &> /dev/null; then
 fi
 docker run --rm \
     -v "$REPORT_DIR:/zap/reports" \
-    zaproxy/zap2docker-stable \
+    ghcr.io/zaproxy/zaproxy:stable \
     zap-full-scan.py \
     -t "$TARGET_URL" \
     -r /zap/reports/zap-report.html \
