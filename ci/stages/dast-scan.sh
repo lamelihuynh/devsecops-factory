@@ -16,7 +16,22 @@ if [ -z "$REPORT_DIR" ]; then
 fi
 mkdir -p "$REPORT_DIR"
 chmod -R 777 "$REPORT_DIR"
+# ... (phần đầu giữ nguyên)
 
+# 2. Kiểm tra tình trạng Container
+echo "[*] Đang kiểm tra danh sách container hiện có:"
+docker ps -a --filter "name=staging-app-local"
+
+# Thử lấy IP lần nữa
+TARGET_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' staging-app-local 2>/dev/null)
+
+if [ -z "$TARGET_IP" ]; then
+    echo "[!] KHÔNG tìm thấy IP. Có thể container đã chết."
+    echo "[*] Đây là log cuối cùng của app để ní soi lỗi:"
+    docker logs staging-app-local || echo "Không có log vì container không tồn tại."
+    exit 1
+fi
+# ... (phần sau giữ nguyên)
 # 2. Lấy IP nội bộ của container app để ZAP không bị lỗi "Unknown Host"
 TARGET_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' staging-app-local)
 
