@@ -1,21 +1,30 @@
 #!/bin/bash
 
-# 1. Lấy IP nội bộ của container đang chạy app
+# 1. Kiểm tra xem REPORT_DIR có dữ liệu không, nếu không có thì lấy thư mục hiện tại làm dự phòng
+REPORT_DIR=${REPORT_DIR:-$(pwd)/scan-reports}
+mkdir -p "$REPORT_DIR"
+
+# 2. Lấy IP của container
 TARGET_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' staging-app-local)
 
-echo "[*] Target App IP detected: $TARGET_IP"
+# Nếu không lấy được IP, dùng tên container (Docker tự phân giải được nếu cùng network)
+TARGET_URL="http://${TARGET_IP:-staging-app-local}:3000"
 
-# 2. Chạy ZAP quét thẳng vào cái IP đó (cổng gốc của app là 3000)
+echo "[*] Reports will be saved in: $REPORT_DIR"
+echo "[*] Scanning target: $TARGET_URL"
+
+# 3. Chạy Docker ZAP
 docker run --rm \
-    -v "$REPORT_DIR:/zap/wrk" \
+    --network bridge \
+    -v "$REPORT_DIR:/zap/wrk:rw" \
     ghcr.io/zaproxy/zaproxy:stable \
     zap-full-scan.py \
-    -t "http://$TARGET_IP:3000" \
+    -t "$TARGET_URL" \
     -r zap-report.html \
     -x zap-report.xml \
     -J zap-report.json \
     -m 2 \
-    -T 5
+    -T 5 || exit 1
 exit_code=$?
 
 if [ -f "$REPORT_DIR/zap-report.json" ]; then
