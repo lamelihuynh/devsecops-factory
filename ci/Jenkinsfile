@@ -18,7 +18,7 @@ pipeline {
   environment{
     // Cấu hình chạy Local - Xóa sạch bóng AWS
     IMAGE_NAME = "devsecops-app-local"
-    SONAR_HOST = "http://localhost:9000" // Có thể đổi thành IP thật nếu cần
+    SONAR_HOST = "http://sonarqube:9000" // Có thể đổi thành IP thật nếu cần
     SCAN_REPORT_DIR = "${WORKSPACE}/scan-reports"
   }
 
